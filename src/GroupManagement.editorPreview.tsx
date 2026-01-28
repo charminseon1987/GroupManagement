@@ -1,9 +1,17 @@
 import { ReactElement, createElement } from "react";
-import { HelloWorldSample } from "./components/HelloWorldSample";
 import { GroupManagementPreviewProps } from "../typings/GroupManagementProps";
 
-export function preview({ sampleText }: GroupManagementPreviewProps): ReactElement {
-    return <HelloWorldSample sampleText={sampleText} />;
+export function preview({ groupDataSource }: GroupManagementPreviewProps): ReactElement {
+    return (
+        <div className="group-management-preview">
+            <p>Group Management Widget</p>
+            {groupDataSource ? (
+                <p>Data source: {typeof groupDataSource === "object" && groupDataSource !== null && "caption" in groupDataSource ? groupDataSource.caption : "Connected"}</p>
+            ) : (
+                <p>Please configure a data source</p>
+            )}
+        </div>
+    );
 }
 
 export function getPreviewCss(): string {

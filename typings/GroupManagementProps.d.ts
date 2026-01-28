@@ -4,13 +4,14 @@
  * @author Mendix Widgets Framework Team
  */
 import { CSSProperties } from "react";
+import { ListValue } from "mendix";
 
 export interface GroupManagementContainerProps {
     name: string;
     class: string;
     style?: CSSProperties;
     tabIndex?: number;
-    sampleText: string;
+    groupDataSource: ListValue;
 }
 
 export interface GroupManagementPreviewProps {
@@ -24,5 +25,5 @@ export interface GroupManagementPreviewProps {
     readOnly: boolean;
     renderMode: "design" | "xray" | "structure";
     translate: (text: string) => string;
-    sampleText: string;
+    groupDataSource: {} | { caption: string } | { type: string } | null;
 }

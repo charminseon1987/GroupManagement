@@ -7,10 +7,10 @@
     <description>My widget description</description>
     <icon/>
     <properties>
-        <propertyGroup caption="General">
-            <property key="sampleText" type="string" required="false">
-                <caption>Default value</caption>
-                <description>Sample text input</description>
+        <propertyGroup caption="Data source">
+            <property key="groupDataSource" type="datasource" required="true" isList="true">
+                <caption>Data source</caption>
+                <description>List of menu items from microflow</description>
             </property>
         </propertyGroup>
     </properties>
