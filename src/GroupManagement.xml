@@ -13,5 +13,14 @@
                 <description>List of menu items from microflow</description>
             </property>
         </propertyGroup>
+        <propertyGroup caption="Events">
+            <property key="onTreeChange" type="action" required="false">
+                <caption>On tree change</caption>
+                <description>Called when tree structure changes (drag/drop). Receives JSON string of changes: [{ groupId, parentId, sortNo, depth }, ...]. Use a Nanoflow/Microflow to update SyGroup entities and refresh the datasource.</description>
+                <actionVariables>
+                    <actionVariable key="changesJson" type="String" caption="Changes JSON" />
+                </actionVariables>
+            </property>
+        </propertyGroup>
     </properties>
 </widget>

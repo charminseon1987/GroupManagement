@@ -4,7 +4,7 @@
  * @author Mendix Widgets Framework Team
  */
 import { CSSProperties } from "react";
-import { ListValue } from "mendix";
+import { ActionValue, ListValue, Option } from "mendix";
 
 export interface GroupManagementContainerProps {
     name: string;
@@ -12,6 +12,7 @@ export interface GroupManagementContainerProps {
     style?: CSSProperties;
     tabIndex?: number;
     groupDataSource: ListValue;
+    onTreeChange?: ActionValue<{ changesJson: Option<string> }>;
 }
 
 export interface GroupManagementPreviewProps {
@@ -26,4 +27,5 @@ export interface GroupManagementPreviewProps {
     renderMode: "design" | "xray" | "structure";
     translate: (text: string) => string;
     groupDataSource: {} | { caption: string } | { type: string } | null;
+    onTreeChange: {} | null;
 }

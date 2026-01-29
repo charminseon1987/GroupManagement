@@ -4,48 +4,58 @@ import { GroupTreeItemMap, GroupTreeChange, GroupTreeChanges, GROUP_ROOT_ID } fr
 const STORAGE_KEY = "groupManagementTreeChanges";
 
 /**
+ * 변경 목록 계산 (localStorage 저장 및 Mendix 액션 호출에 공통 사용)
+ */
+function computeChanges(items: GroupTreeItemMap, previousItems: GroupTreeItemMap): GroupTreeChange[] {
+    const changes: GroupTreeChange[] = [];
+
+    Object.keys(items).forEach(itemId => {
+        if (itemId === GROUP_ROOT_ID) return;
+
+        const currentItem = items[itemId];
+        const previousItem = previousItems[itemId];
+
+        if (!currentItem) return;
+
+        if (
+            !previousItem ||
+            previousItem.data.parentId !== currentItem.data.parentId ||
+            previousItem.data.sortNo !== currentItem.data.sortNo ||
+            previousItem.data.depth !== currentItem.data.depth
+        ) {
+            changes.push({
+                groupId: currentItem.data.id,
+                parentId: currentItem.data.parentId,
+                sortNo: currentItem.data.sortNo,
+                depth: currentItem.data.depth
+            });
+        }
+    });
+
+    return changes;
+}
+
+/**
  * localStorage에 변경사항을 저장하는 훅
  */
 export function useLocalStorageSync() {
     /**
+     * 변경 목록 반환 (Mendix 액션 호출 등에 사용)
+     */
+    const getChangesList = useCallback(
+        (items: GroupTreeItemMap, previousItems: GroupTreeItemMap): GroupTreeChange[] => {
+            return computeChanges(items, previousItems);
+        },
+        []
+    );
+
+    /**
      * 트리 변경사항을 localStorage에 저장
      */
     const saveChanges = useCallback((items: GroupTreeItemMap, previousItems: GroupTreeItemMap) => {
-        const changes: GroupTreeChange[] = [];
+        const changes = computeChanges(items, previousItems);
+        if (changes.length === 0) return;
 
-        // 변경된 아이템 찾기
-        Object.keys(items).forEach(itemId => {
-            if (itemId === GROUP_ROOT_ID) {
-                return; // 루트는 제외
-            }
-
-            const currentItem = items[itemId];
-            const previousItem = previousItems[itemId];
-
-            if (!currentItem) {
-                return;
-            }
-
-            // 이전 아이템이 없거나, parentId, sortNo, depth가 변경된 경우
-            if (!previousItem || 
-                previousItem.data.parentId !== currentItem.data.parentId ||
-                previousItem.data.sortNo !== currentItem.data.sortNo ||
-                previousItem.data.depth !== currentItem.data.depth) {
-                
-                changes.push({
-                    groupId: currentItem.data.id,
-                    parentId: currentItem.data.parentId,
-                    sortNo: currentItem.data.sortNo,
-                    depth: currentItem.data.depth
-                });
-            }
-        });
-
-        if (changes.length === 0) {
-            return; // 변경사항이 없으면 저장하지 않음
-        }
-
-        // localStorage에 저장
         const changesData: GroupTreeChanges = {
             changes,
             timestamp: new Date().toISOString()
@@ -87,6 +97,7 @@ export function useLocalStorageSync() {
 
     return {
         saveChanges,
+        getChangesList,
         loadChanges,
         clearChanges,
         storageKey: STORAGE_KEY

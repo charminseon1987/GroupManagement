@@ -45,7 +45,10 @@ export function convertMendixEntitiesToTree(
         const parentId = entity.ParentId || null;
         const sortNo = entity.SortNo ?? 0;
         const depth = entity.Depth ?? 0;
-        const name = entity.GroupName || entity.Groupld || entity.id || "";
+        // GroupName이 실제 값인지 확인 (빈 문자열이 아닌지)
+        const name = (entity.GroupName && entity.GroupName.trim() !== "") 
+            ? entity.GroupName 
+            : (entity.Groupld || entity.id || "");
         const description = entity.Description;
         const enabled = entity.EnableTF ?? true;
 
@@ -80,14 +83,19 @@ export function convertMendixEntitiesToTree(
     Object.values(itemMap).forEach(item => {
         const parentId = item.data.parentId;
         
-        if (parentId && itemMap[parentId]) {
-            // 부모가 있는 경우
+        // parentId가 있고, null이나 빈 문자열이 아니며, 실제 부모가 itemMap에 있는 경우
+        if (parentId && parentId !== "" && parentId !== null && itemMap[parentId]) {
+            // 부모가 있는 경우 - 부모의 children에 추가
             const parent = itemMap[parentId];
             if (!parent.children) {
                 parent.children = [];
             }
-            parent.children.push(item.index);
+            // 중복 방지
+            if (!parent.children.includes(item.index)) {
+                parent.children.push(item.index);
+            }
         }
+        // parentId가 null이거나 빈 문자열이면 이미 rootChildren에 추가되었으므로 여기서는 처리하지 않음
     });
 
     // 정렬: SortNo 기준으로 정렬
