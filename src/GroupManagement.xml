@@ -12,6 +12,59 @@
                 <caption>Data source</caption>
                 <description>List of menu items from microflow</description>
             </property>
+            <property key="groupNameAttr" type="attribute" dataSource="groupDataSource" required="true">
+                <caption>Group Name</caption>
+                <description>Attribute for group name</description>
+                <attributeTypes>
+                    <attributeType name="String"/>
+                </attributeTypes>
+            </property>
+            <property key="parentIdAttr" type="attribute" dataSource="groupDataSource" required="true">
+                <caption>Parent ID</caption>
+                <description>Attribute for parent ID (String)</description>
+                <attributeTypes>
+                    <attributeType name="String"/>
+                </attributeTypes>
+            </property>
+            <property key="sortNoAttr" type="attribute" dataSource="groupDataSource" required="true">
+                <caption>Sort Order</caption>
+                <description>Attribute for sort order (Integer/Long)</description>
+                <attributeTypes>
+                    <attributeType name="Integer"/>
+                    <attributeType name="Long"/>
+                </attributeTypes>
+            </property>
+            <property key="depthAttr" type="attribute" dataSource="groupDataSource" required="true">
+                <caption>Depth</caption>
+                <description>Attribute for depth level (Integer/Long)</description>
+                <attributeTypes>
+                    <attributeType name="Integer"/>
+                    <attributeType name="Long"/>
+                </attributeTypes>
+            </property>
+            <property key="descriptionAttr" type="attribute" dataSource="groupDataSource" required="false">
+                <caption>Description</caption>
+                <description>Attribute for description (String)</description>
+                <attributeTypes>
+                    <attributeType name="String"/>
+                </attributeTypes>
+            </property>
+            <property key="enableAttr" type="attribute" dataSource="groupDataSource" required="false">
+                <caption>Enable Status</caption>
+                <description>Attribute for enabled status (Boolean)</description>
+                <attributeTypes>
+                    <attributeType name="Boolean"/>
+                </attributeTypes>
+            </property>
+            <property key="groupIdAttr" type="attribute" dataSource="groupDataSource" required="false">
+                <caption>Group ID</caption>
+                <description>Attribute for group ID (Optional, String)</description>
+                <attributeTypes>
+                    <attributeType name="String"/>
+                    <attributeType name="AutoNumber"/>
+                    <attributeType name="Long"/>
+                </attributeTypes>
+            </property>
         </propertyGroup>
         <propertyGroup caption="Events">
             <property key="onTreeChange" type="action" required="false">

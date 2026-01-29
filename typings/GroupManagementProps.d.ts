@@ -4,7 +4,8 @@
  * @author Mendix Widgets Framework Team
  */
 import { CSSProperties } from "react";
-import { ActionValue, ListValue, Option } from "mendix";
+import { ActionValue, ListValue, Option, ListAttributeValue } from "mendix";
+import { Big } from "big.js";
 
 export interface GroupManagementContainerProps {
     name: string;
@@ -12,6 +13,13 @@ export interface GroupManagementContainerProps {
     style?: CSSProperties;
     tabIndex?: number;
     groupDataSource: ListValue;
+    groupNameAttr: ListAttributeValue<string>;
+    parentIdAttr: ListAttributeValue<string>;
+    sortNoAttr: ListAttributeValue<Big>;
+    depthAttr: ListAttributeValue<Big>;
+    descriptionAttr?: ListAttributeValue<string>;
+    enableAttr?: ListAttributeValue<boolean>;
+    groupIdAttr?: ListAttributeValue<string | Big>;
     onTreeChange?: ActionValue<{ changesJson: Option<string> }>;
 }
 
@@ -27,5 +35,12 @@ export interface GroupManagementPreviewProps {
     renderMode: "design" | "xray" | "structure";
     translate: (text: string) => string;
     groupDataSource: {} | { caption: string } | { type: string } | null;
+    groupNameAttr: string;
+    parentIdAttr: string;
+    sortNoAttr: string;
+    depthAttr: string;
+    descriptionAttr: string;
+    enableAttr: string;
+    groupIdAttr: string;
     onTreeChange: {} | null;
 }

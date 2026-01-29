@@ -50,63 +50,60 @@
 .group-tree-item-container {
     position: relative;
     margin-bottom: 2px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
-/* 뎁스 레벨 연결선 */
+/* 뎁스 레벨 연결선 스타일 정리 */
 .group-tree-depth-line-vertical {
     position: absolute;
     top: 0;
     bottom: 0;
     width: 1px;
-    background-color: #b0b0b0;
+    background-color: #ccc;
     pointer-events: none;
-    z-index: 0;
-}
-
-.group-tree-depth-line-vertical.has-sibling-after {
-    /* 형제가 있는 경우 세로선을 아래까지 연장 */
-    bottom: -5000px;
+    z-index: 1;
 }
 
 .group-tree-depth-line-horizontal {
     position: absolute;
     height: 1px;
-    background-color: #b0b0b0;
+    background-color: #ccc;
     pointer-events: none;
-    z-index: 0;
+    z-index: 1;
 }
 
-/* 뎁스 레벨별 들여쓰기 */
+/* 뎁스 레벨별 들여쓰기 - Padding 대신 Margin 사용 및 레이아웃 유지 */
 .group-tree-item-container.depth-0 {
     padding-left: 0;
 }
 
 .group-tree-item-container.depth-1 {
-    padding-left: 20px;
+    padding-left: 16px;
 }
 
 .group-tree-item-container.depth-2 {
-    padding-left: 40px;
+    padding-left: 32px;
 }
 
 .group-tree-item-container.depth-3 {
-    padding-left: 60px;
+    padding-left: 48px;
 }
 
 .group-tree-item-container.depth-4 {
-    padding-left: 80px;
+    padding-left: 64px;
 }
 
 .group-tree-item-container.depth-5 {
-    padding-left: 100px;
+    padding-left: 80px;
 }
 
-.group-tree-item-container.is-dragging-over {
+.group-tree-item.is-dragging-over {
     background-color: rgba(0, 123, 255, 0.1);
     border-radius: 4px;
 }
 
-.group-tree-item-container.is-dragging-over::after {
+.group-tree-item.is-dragging-over::after {
     content: '';
     position: absolute;
     left: 0;
@@ -132,13 +129,14 @@
     background: #ffffff;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     position: relative;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .group-tree-item:hover {
     background: linear-gradient(to right, rgba(0, 123, 255, 0.05), rgba(0, 123, 255, 0.02));
     border-color: rgba(0, 123, 255, 0.3);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    transform: translateX(2px);
 }
 
 .group-tree-item.is-selected {
@@ -335,12 +333,11 @@
     top: 0;
     bottom: 0;
     width: 2px;
-    background: linear-gradient(180deg, 
-        transparent 0%,
-        rgba(0, 123, 255, 0.2) 20%,
-        rgba(0, 123, 255, 0.2) 80%,
-        transparent 100%
-    );
+    background: linear-gradient(180deg,
+            transparent 0%,
+            rgba(0, 123, 255, 0.2) 20%,
+            rgba(0, 123, 255, 0.2) 80%,
+            transparent 100%);
 }
 
 .group-tree-children::after {
@@ -364,9 +361,12 @@
 }
 
 @keyframes pulse {
-    0%, 100% {
+
+    0%,
+    100% {
         opacity: 1;
     }
+
     50% {
         opacity: 0.7;
     }

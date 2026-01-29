@@ -5,8 +5,23 @@ import { convertMendixEntitiesToTree, MendixGroupEntity } from "../utils/treeDat
 /**
  * Mendix datasource에서 Group 데이터를 읽어 트리 형식으로 변환하는 훅
  */
+import { ListAttributeValue } from "mendix";
+import { Big } from "big.js";
+
+/**
+ * Mendix datasource에서 Group 데이터를 읽어 트리 형식으로 변환하는 훅
+ */
 export function useGroupTreeData(
-    datasource: any[] | undefined
+    datasource: any[] | undefined,
+    config?: {
+        groupNameAttr?: ListAttributeValue<string>;
+        parentIdAttr?: ListAttributeValue<string>;
+        sortNoAttr?: ListAttributeValue<Big>;
+        depthAttr?: ListAttributeValue<Big>;
+        descriptionAttr?: ListAttributeValue<string>;
+        enableAttr?: ListAttributeValue<boolean>;
+        groupIdAttr?: ListAttributeValue<string | Big>;
+    }
 ): GroupTreeItemMap {
     return useMemo(() => {
         if (!datasource || !Array.isArray(datasource)) {
@@ -15,190 +30,143 @@ export function useGroupTreeData(
 
         // Mendix 엔티티를 변환
         const entities: MendixGroupEntity[] = datasource.map((item: any) => {
+            // Mendix ListAttributeValue에서 값 추출
+            const getMendixAttrValue = (attr?: ListAttributeValue<any>): any | undefined => {
+                if (!attr) return undefined;
+                const attrValue = attr.get(item);
+                return attrValue.value; // Mendix 9+ EditableValue
+            };
+
             // Mendix 엔티티 속성 접근 헬퍼 함수
-            const getAttribute = (attrName: string): string | undefined => {
+            const getAttributeValue = (attrName?: string): string | undefined => {
+                if (!attrName) return undefined;
+
+                // Mendix 객체의 get() 메서드 사용
                 if (typeof item.get === "function") {
-                    const value = item.get(attrName);
-                    if (typeof value === "string") return value;
-                    if (value != null && typeof value === "object" && "value" in value) {
-                        const val = (value as { value: unknown }).value;
-                        return typeof val === "string" ? val : String(val);
+                    try {
+                        const value = item.get(attrName);
+                        if (value === undefined || value === null) return undefined;
+                        if (typeof value === "string") return value;
+                        // 객체 형태 (예: {value: ...}) 처리
+                        if (typeof value === "object" && "value" in value) {
+                            const val = (value as { value: unknown }).value;
+                            return val != null ? String(val) : undefined;
+                        }
+                        return String(value);
+                    } catch (e) {
+                        // 속성이 없거나 오류 발생 시 무시하고 undefined 반환
+                        return undefined;
                     }
-                    return value != null ? String(value) : undefined;
                 }
-                // get() 메서드가 없으면 직접 속성 접근
-                const directValue = item[attrName];
-                if (directValue != null) {
-                    if (typeof directValue === "string") return directValue;
-                    if (typeof directValue === "object" && "value" in directValue) {
-                        const val = (directValue as { value: unknown }).value;
-                        return typeof val === "string" ? val : String(val);
-                    }
-                    return String(directValue);
+
+                // 직접 속성 접근
+                const val = item[attrName];
+                if (val != null) return String(val);
+
+                return undefined;
+            };
+
+
+
+            // 1. Group Name
+            let groupName = "";
+            const explicitGroupName = getMendixAttrValue(config?.groupNameAttr);
+
+            if (explicitGroupName) {
+                groupName = explicitGroupName;
+            } else {
+                // Fallback: 기존 로직
+                let groupNameRaw: string | undefined;
+                const possibleAttributeNames = [
+                    "groupname", "GroupName", "groupName", "Group_Name", "group_name", "GROUPNAME", "Name", "name"
+                ];
+                for (const attrName of possibleAttributeNames) {
+                    if (groupNameRaw) break;
+                    groupNameRaw = getAttributeValue(attrName);
+                    if (groupNameRaw && groupNameRaw.trim() !== "") break;
+                }
+
+                if (groupNameRaw && groupNameRaw.trim() !== "") {
+                    groupName = groupNameRaw;
+                } else {
+                    const idVal = getAttributeValue("Groupld") || getAttributeValue("GroupId") || item.id;
+                    groupName = idVal || "(이름 없음)";
+                }
+            }
+
+            // 2. Other Attributes
+            const getAttrAnyCase = (names: string[]): string | undefined => {
+                for (const name of names) {
+                    const val = getAttributeValue(name);
+                    if (val !== undefined) return val;
                 }
                 return undefined;
             };
 
-            const getNumberAttribute = (attrName: string, defaultValue: number = 0): number => {
-                const value = getAttribute(attrName);
-                if (value === undefined) return defaultValue;
-                const num = Number(value);
-                return isNaN(num) ? defaultValue : num;
-            };
+            // GroupID
+            const explicitGroupId = getMendixAttrValue(config?.groupIdAttr);
+            let groupId = "";
+            if (explicitGroupId) {
+                groupId = String(explicitGroupId);
+            } else {
+                groupId = getAttrAnyCase(["Groupld", "GroupId", "groupid", "groupId"]) || item.id || "";
+            }
 
-            const getBooleanAttribute = (attrName: string, defaultValue: boolean = true): boolean => {
-                const value = getAttribute(attrName);
-                if (value === undefined) return defaultValue;
-                if (typeof value === "boolean") return value;
-                if (typeof value === "string") {
-                    return value.toLowerCase() === "true" || value === "1";
-                }
-                return Boolean(value);
-            };
+            // ParentID
+            const explicitParentId = getMendixAttrValue(config?.parentIdAttr);
+            let parentId: string | null = null;
+            if (explicitParentId !== undefined) { // null check needs care since it can be null
+                parentId = explicitParentId;
+            } else {
+                parentId = getAttrAnyCase(["ParentId", "parentid", "parentId"]) || null;
+            }
 
-            // GroupName을 우선적으로 가져오기 (Mendix의 GroupName 속성)
-            // 데이터베이스 컬럼명은 groupname (소문자)이므로 다양한 변형 시도
-            // Mendix ListValue 아이템에서 속성 접근 방식:
-            // 1. item.get("GroupName") 또는 item.get("groupname") - Mendix get 메서드
-            // 2. item.GroupName 또는 item.groupname - 직접 속성 접근
-            // 3. item.GroupName?.value 또는 item.groupname?.value - value 속성을 가진 객체
-            let groupNameRaw: string | undefined;
-            
-            // 시도할 속성 이름 목록 (대소문자 변형 포함)
-            const possibleAttributeNames = [
-                "GroupName",      // 표준 대문자
-                "groupname",      // 소문자 (데이터베이스 컬럼명)
-                "groupName",      // camelCase
-                "Group_Name",     // 스네이크 케이스 대문자
-                "group_name",     // 스네이크 케이스 소문자
-                "GROUPNAME",      // 대문자 전체
-                "Name",           // 짧은 이름
-                "name"            // 짧은 이름 소문자
-            ];
-            
-            // 방법 1: get() 메서드 사용하여 모든 변형 시도
-            if (typeof item.get === "function") {
-                for (const attrName of possibleAttributeNames) {
-                    if (groupNameRaw) break;
-                    try {
-                        const value = item.get(attrName);
-                        if (value != null) {
-                            if (typeof value === "string" && value.trim() !== "") {
-                                groupNameRaw = value;
-                                break;
-                            } else if (typeof value === "object" && "value" in value) {
-                                const val = (value as { value: unknown }).value;
-                                if (typeof val === "string" && val.trim() !== "") {
-                                    groupNameRaw = val;
-                                    break;
-                                } else if (val != null) {
-                                    groupNameRaw = String(val);
-                                    break;
-                                }
-                            } else if (value != null) {
-                                groupNameRaw = String(value);
-                                break;
-                            }
-                        }
-                    } catch (e) {
-                        // 다음 속성 이름 시도
-                        continue;
-                    }
+            // SortNo
+            const explicitSortNo = getMendixAttrValue(config?.sortNoAttr);
+            let sortNo = 0;
+            if (explicitSortNo) {
+                sortNo = Number(explicitSortNo);
+            } else {
+                sortNo = Number(getAttrAnyCase(["SortNo", "sortno", "sortNo"]) || "0");
+            }
+
+            // Depth
+            const explicitDepth = getMendixAttrValue(config?.depthAttr);
+            let depth = 0;
+            if (explicitDepth) {
+                depth = Number(explicitDepth);
+            } else {
+                depth = Number(getAttrAnyCase(["Depth", "depth"]) || "0");
+            }
+
+            // Description
+            const explicitDesc = getMendixAttrValue(config?.descriptionAttr);
+            const description = explicitDesc || getAttrAnyCase(["Description", "description"]);
+
+            // Enabled
+            const explicitEnabled = getMendixAttrValue(config?.enableAttr);
+            let enabled = true;
+            if (explicitEnabled !== undefined) {
+                enabled = explicitEnabled;
+            } else {
+                const enabledVal = getAttrAnyCase(["EnableTF", "enabletf", "Enabled", "enabled"]);
+                if (enabledVal !== undefined) {
+                    if (enabledVal.toLowerCase() === "false" || enabledVal === "0") enabled = false;
                 }
             }
-            
-            // 방법 2: 직접 속성 접근 (모든 변형 시도)
-            if (!groupNameRaw) {
-                for (const attrName of possibleAttributeNames) {
-                    if (groupNameRaw) break;
-                    const directValue = item[attrName];
-                    if (directValue != null) {
-                        if (typeof directValue === "string" && directValue.trim() !== "") {
-                            groupNameRaw = directValue;
-                            break;
-                        } else if (typeof directValue === "object" && "value" in directValue) {
-                            const val = (directValue as { value: unknown }).value;
-                            if (typeof val === "string" && val.trim() !== "") {
-                                groupNameRaw = val;
-                                break;
-                            } else if (val != null) {
-                                groupNameRaw = String(val);
-                                break;
-                            }
-                        } else {
-                            groupNameRaw = String(directValue);
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // 방법 3: getAttribute 헬퍼 함수 사용 (모든 변형 시도)
-            if (!groupNameRaw) {
-                for (const attrName of possibleAttributeNames) {
-                    if (groupNameRaw) break;
-                    groupNameRaw = getAttribute(attrName);
-                    if (groupNameRaw && groupNameRaw.trim() !== "") {
-                        break;
-                    }
-                }
-            }
-            
-            // GroupName이 실제 값인지 확인 (빈 문자열이 아닌지)
-            const groupName = (groupNameRaw && groupNameRaw.trim() !== "") 
-                ? groupNameRaw 
-                : (getAttribute("Groupld") || getAttribute("id") || "");
-            
-            // 디버깅: GroupName이 제대로 읽히지 않으면 콘솔에 경고 및 상세 정보
-            if (!groupNameRaw) {
-                // 사용 가능한 모든 속성 이름 확인
-                const availableKeys = Object.keys(item).filter(k => 
-                    !k.startsWith("_") && 
-                    typeof item[k] !== "function" &&
-                    k.toLowerCase().includes("name") || k.toLowerCase().includes("group")
-                );
-                
-                // get() 메서드로 가능한 속성 이름들 시도 (더 많은 변형 포함)
-                const possibleNames: string[] = [];
-                if (typeof item.get === "function") {
-                    const testNames = ["GroupName", "groupname", "groupName", "Group_Name", "group_name", "GROUPNAME", "Name", "name"];
-                    testNames.forEach(name => {
-                        try {
-                            const val = item.get(name);
-                            if (val !== undefined && val !== null) {
-                                const valStr = typeof val === "object" && "value" in val ? String(val.value) : String(val);
-                                possibleNames.push(`${name}: ${valStr}`);
-                            }
-                        } catch (e) {
-                            // 무시
-                        }
-                    });
-                }
-                
-                console.warn("SyGroup 엔티티의 GroupName 속성을 찾을 수 없습니다.", {
-                    itemId: item.id || item.Groupld || "unknown",
-                    availableKeys: Object.keys(item).filter(k => !k.startsWith("_") && typeof item[k] !== "function"),
-                    nameRelatedKeys: availableKeys,
-                    possibleNames: possibleNames,
-                    GroupNameDirect: item.GroupName,
-                    hasGetMethod: typeof item.get === "function",
-                    itemType: typeof item,
-                    itemConstructor: item.constructor?.name
-                });
-            }
-            
+
             return {
-                Groupld: getAttribute("Groupld") || getAttribute("id") || "",
+                Groupld: groupId, // 호환성 유지
                 GroupName: groupName,
-                ParentId: getAttribute("ParentId") || null,
-                SortNo: getNumberAttribute("SortNo", 0),
-                Depth: getNumberAttribute("Depth", 0),
-                Description: getAttribute("Description"),
-                EnableTF: getBooleanAttribute("EnableTF", true),
-                id: getAttribute("id") || ""
+                ParentId: parentId,
+                SortNo: sortNo,
+                Depth: depth,
+                Description: description,
+                EnableTF: enabled,
+                id: item.id || ""
             };
         });
 
         return convertMendixEntitiesToTree(entities);
-    }, [datasource]);
+    }, [datasource, config]);
 }

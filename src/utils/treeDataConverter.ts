@@ -1,5 +1,5 @@
-import { TreeItem, TreeItemIndex } from "react-complex-tree";
-import { GroupTreeItemData, GroupTreeItemMap, GROUP_ROOT_ID } from "../types/groupTree.types";
+import { TreeItemIndex } from "react-complex-tree";
+import { GroupItemData, GroupTreeItem, GroupTreeItemMap, GROUP_ROOT_ID } from "../types/groupTree.types";
 
 /**
  * Mendix 엔티티 데이터 타입
@@ -31,10 +31,10 @@ export function convertMendixEntitiesToTree(
     entities: MendixGroupEntity[]
 ): GroupTreeItemMap {
     const itemMap: GroupTreeItemMap = {};
-    
+
     // 루트 아이템 생성
     const rootChildren: TreeItemIndex[] = [];
-    
+
     // 모든 엔티티를 TreeItem으로 변환
     entities.forEach(entity => {
         const groupId = entity.Groupld || entity.id || "";
@@ -46,23 +46,32 @@ export function convertMendixEntitiesToTree(
         const sortNo = entity.SortNo ?? 0;
         const depth = entity.Depth ?? 0;
         // GroupName이 실제 값인지 확인 (빈 문자열이 아닌지)
-        const name = (entity.GroupName && entity.GroupName.trim() !== "") 
-            ? entity.GroupName 
+        const name = (entity.GroupName && entity.GroupName.trim() !== "")
+            ? entity.GroupName
             : (entity.Groupld || entity.id || "");
         const description = entity.Description;
         const enabled = entity.EnableTF ?? true;
 
-        const itemData: GroupTreeItemData = {
-            id: groupId,
-            name,
+        const itemData: GroupItemData = {
+            groupId: groupId,
+            groupName: name,
             parentId,
             sortNo,
             depth,
             description,
-            enabled
+            enabledTF: enabled,
+            // 기본값 설정 (추후 Mendix에서 가져올 수 있음)
+            leftNo: 0,
+            rightNo: 0,
+            displayYn: "Y"
         };
 
-        const item: TreeItem<GroupTreeItemData> = {
+        // 디버깅: GroupName이 ID로 대체된 경우 경고
+        if (name === groupId && process.env.NODE_ENV === "development") {
+            console.warn(`[TreeConverter] Group "${groupId}"의 GroupName이 없어 ID를 사용합니다.`);
+        }
+
+        const item: GroupTreeItem = {
             index: groupId,
             data: itemData,
             children: [],
@@ -82,7 +91,7 @@ export function convertMendixEntitiesToTree(
     // 부모-자식 관계 설정
     Object.values(itemMap).forEach(item => {
         const parentId = item.data.parentId;
-        
+
         // parentId가 있고, null이나 빈 문자열이 아니며, 실제 부모가 itemMap에 있는 경우
         if (parentId && parentId !== "" && parentId !== null && itemMap[parentId]) {
             // 부모가 있는 경우 - 부모의 children에 추가
@@ -112,15 +121,18 @@ export function convertMendixEntitiesToTree(
     });
 
     // 루트 아이템 생성
-    const rootItem: TreeItem<GroupTreeItemData> = {
+    const rootItem: GroupTreeItem = {
         index: GROUP_ROOT_ID,
         data: {
-            id: GROUP_ROOT_ID as string,
-            name: "Root",
+            groupId: GROUP_ROOT_ID as string,
+            groupName: "Root",
             parentId: null,
             sortNo: 0,
             depth: -1,
-            enabled: true
+            enabledTF: true,
+            leftNo: 0,
+            rightNo: 0,
+            displayYn: "Y"
         },
         children: rootChildren.sort((a, b) => {
             const itemA = itemMap[a];

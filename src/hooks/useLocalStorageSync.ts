@@ -24,7 +24,7 @@ function computeChanges(items: GroupTreeItemMap, previousItems: GroupTreeItemMap
             previousItem.data.depth !== currentItem.data.depth
         ) {
             changes.push({
-                groupId: currentItem.data.id,
+                groupId: currentItem.data.groupId,
                 parentId: currentItem.data.parentId,
                 sortNo: currentItem.data.sortNo,
                 depth: currentItem.data.depth

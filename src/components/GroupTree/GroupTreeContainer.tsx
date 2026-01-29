@@ -11,7 +11,7 @@ import {
 import classNames from "classnames";
 import {
     GroupTreeItemMap,
-    GroupTreeItemData,
+    GroupItemData,
     GROUP_ROOT_ID
 } from "../../types/groupTree.types";
 import { isDescendant } from "../../utils/isDescendant";
@@ -54,12 +54,11 @@ export function GroupTreeContainer({
 
     // 드래그 가능 여부 핸들러
     const canDragHandler = useCallback(
-        (items: TreeItem<GroupTreeItemData>[]): boolean => {
+        (items: TreeItem<GroupItemData>[]): boolean => {
             // 루트는 드래그 불가, 비활성화된 항목도 드래그 불가
             return items.every(
-                item => item.index !== GROUP_ROOT_ID && 
-                item.canMove !== false && 
-                item.data.enabled
+                item => item.index !== GROUP_ROOT_ID &&
+                    item.data.enabledTF !== false
             );
         },
         []
@@ -67,7 +66,7 @@ export function GroupTreeContainer({
 
     // 드롭 가능 여부 핸들러
     const canDropAtHandler = useCallback(
-        (items: TreeItem<GroupTreeItemData>[], target: DraggingPosition): boolean => {
+        (items: TreeItem<GroupItemData>[], target: DraggingPosition): boolean => {
             const draggedIds = items.map(item => item.index);
 
             // 타겟 아이템 결정
@@ -87,17 +86,10 @@ export function GroupTreeContainer({
             // 대상이 존재하지 않으면 드롭 불가
             if (!targetItem) return false;
 
-            // 자기 자신에게 드롭 불가
+            // 자기 자신이나 자신의 하위 항목에 드롭 불가 (순환 참조 방지)
             if (draggedIds.includes(targetItemId)) return false;
-
-            // 자신의 하위 항목에 드롭 불가 (순환 참조 방지)
             for (const draggedId of draggedIds) {
                 if (isDescendant(treeItems, draggedId, targetItemId)) return false;
-            }
-
-            // item 타입일 경우 폴더가 아니면 드롭 불가
-            if (target.targetType === "item" && !targetItem.isFolder) {
-                return false;
             }
 
             return true;
@@ -107,7 +99,7 @@ export function GroupTreeContainer({
 
     // 드롭 핸들러
     const onDropHandler = useCallback(
-        (items: TreeItem<GroupTreeItemData>[], target: DraggingPosition): void => {
+        (items: TreeItem<GroupItemData>[], target: DraggingPosition): void => {
             const newItems = { ...treeItems };
             const draggedIds = items.map(item => item.index);
 
@@ -126,35 +118,15 @@ export function GroupTreeContainer({
 
             if (target.targetType === "root") {
                 targetParentId = GROUP_ROOT_ID;
-                const rootItem = newItems[GROUP_ROOT_ID];
-                targetIndex = rootItem.children?.length || 0;
-                console.log("Dropping to root, targetIndex:", targetIndex);
+                targetIndex = newItems[GROUP_ROOT_ID].children?.length || 0;
             } else if (target.targetType === "item") {
-                // 타겟 아이템이 폴더인지 확인
-                const targetItemId = (target as any).targetItem;
-                const targetItem = newItems[targetItemId];
-                console.log("Dropping on item:", {
-                    targetItemId: targetItemId,
-                    isFolder: targetItem?.isFolder,
-                    hasChildren: targetItem?.children?.length || 0
-                });
-                
-                if (targetItem && targetItem.isFolder) {
-                    // 폴더 위에 드롭: 해당 폴더의 children에 추가
-                    targetParentId = targetItemId;
-                    targetIndex = targetItem.children?.length || 0;
-                    console.log("Dropping into folder:", targetParentId, "at index:", targetIndex);
-                } else {
-                    // 폴더가 아니면 드롭 불가 (이미 canDropAtHandler에서 체크하지만 안전장치)
-                    console.warn("Target item is not a folder, cannot drop");
-                    return;
-                }
+                // 아이템 위에 드롭 -> 해당 아이템을 부모로 설정
+                targetParentId = target.targetItem;
+                targetIndex = newItems[targetParentId].children?.length || 0;
             } else {
-                // between-items: 부모 아이템의 children 사이에 삽입
-                const betweenTarget = target as any;
-                targetParentId = betweenTarget.parentItem;
-                targetIndex = betweenTarget.childIndex;
-                console.log("Dropping between items, parent:", targetParentId, "at index:", targetIndex);
+                // 아이템 사이(between-items) -> 부모 아이템의 특정 인덱스에 삽입
+                targetParentId = target.parentItem;
+                targetIndex = target.childIndex;
             }
 
             // 모든 드래그된 아이템에 대해 처리
@@ -189,7 +161,7 @@ export function GroupTreeContainer({
                     }
                     const newChildren = [...newParent.children];
                     const adjustedIndex = Math.min(targetIndex + offsetIndex, newChildren.length);
-                    
+
                     // 중복 방지: 이미 children에 있으면 제거 후 다시 추가
                     const existingIndex = newChildren.indexOf(draggedId);
                     if (existingIndex !== -1) {
@@ -199,7 +171,7 @@ export function GroupTreeContainer({
                             targetIndex--;
                         }
                     }
-                    
+
                     newChildren.splice(adjustedIndex, 0, draggedId);
 
                     newItems[targetParentId] = {
@@ -209,8 +181,8 @@ export function GroupTreeContainer({
                 }
 
                 // 드래그된 아이템의 parentId 및 depth 업데이트
-                const newDepth = targetParentId === GROUP_ROOT_ID 
-                    ? 1 
+                const newDepth = targetParentId === GROUP_ROOT_ID
+                    ? 1
                     : calculateDepth(newItems, targetParentId) + 1;
 
                 newItems[draggedId] = {
@@ -222,8 +194,35 @@ export function GroupTreeContainer({
                         sortNo: targetIndex + offsetIndex
                     }
                 };
-                
-                console.log("Updated item:", {
+
+                // 자식 아이템들의 depth도 재귀적으로 업데이트
+                const updateChildrenDepth = (
+                    items: GroupTreeItemMap,
+                    parentId: TreeItemIndex,
+                    parentDepth: number
+                ) => {
+                    const parent = items[parentId];
+                    if (parent && parent.children) {
+                        parent.children.forEach(childId => {
+                            const child = items[childId];
+                            if (child) {
+                                const newChildDepth = parentDepth + 1;
+                                items[childId] = {
+                                    ...child,
+                                    data: {
+                                        ...child.data,
+                                        depth: newChildDepth
+                                    }
+                                };
+                                updateChildrenDepth(items, childId, newChildDepth);
+                            }
+                        });
+                    }
+                };
+
+                updateChildrenDepth(newItems, draggedId, newDepth);
+
+                console.log("Updated item with children:", {
                     draggedId,
                     newParentId,
                     newDepth,
@@ -247,17 +246,17 @@ export function GroupTreeContainer({
     );
 
     // 폴더 확장
-    const handleExpandItem = useCallback((item: TreeItem<GroupTreeItemData>) => {
+    const handleExpandItem = useCallback((item: TreeItem<GroupItemData>) => {
         setExpandedItems(prev => [...prev, item.index]);
     }, []);
 
     // 폴더 축소
-    const handleCollapseItem = useCallback((item: TreeItem<GroupTreeItemData>) => {
+    const handleCollapseItem = useCallback((item: TreeItem<GroupItemData>) => {
         setExpandedItems(prev => prev.filter(id => id !== item.index));
     }, []);
 
     // 아이템 포커스
-    const handleFocusItem = useCallback((item: TreeItem<GroupTreeItemData>) => {
+    const handleFocusItem = useCallback((item: TreeItem<GroupItemData>) => {
         setFocusedItem(item.index);
     }, []);
 
@@ -268,14 +267,14 @@ export function GroupTreeContainer({
 
     // 아이템 이름 변경
     const handleRenameItem = useCallback(
-        (item: TreeItem<GroupTreeItemData>, name: string): void => {
+        (item: TreeItem<GroupItemData>, name: string): void => {
             const newItems = {
                 ...treeItems,
                 [item.index]: {
                     ...treeItems[item.index],
                     data: {
                         ...treeItems[item.index].data,
-                        name
+                        groupName: name
                     }
                 }
             };
@@ -287,7 +286,7 @@ export function GroupTreeContainer({
     // 아이템 렌더러
     const renderItem = useCallback(
         ({ item, context, children }: {
-            item: TreeItem<GroupTreeItemData>;
+            item: TreeItem<GroupItemData>;
             context: TreeItemRenderContext;
             children: React.ReactNode;
         }) => {
@@ -298,7 +297,6 @@ export function GroupTreeContainer({
                     children={children}
                     onRemove={onRemoveItem}
                     onAddSubFolder={onAddSubFolder}
-                    treeItems={treeItems}
                 />
             );
         },
@@ -321,7 +319,7 @@ export function GroupTreeContainer({
         <div className="group-tree-container">
             <ControlledTreeEnvironment
                 items={treeItems}
-                getItemTitle={item => item.data.name}
+                getItemTitle={item => item.data.groupName}
                 viewState={viewState}
                 canDragAndDrop={true}
                 canDropOnFolder={true}
@@ -340,7 +338,7 @@ export function GroupTreeContainer({
                 defaultInteractionMode={InteractionMode.ClickItemToExpand}
                 renderItem={renderItem}
                 renderItemTitle={({ item }) => (
-                    <span className="group-tree-item-title">{item.data.name}</span>
+                    <span className="group-tree-item-title">{item.data.groupName}</span>
                 )}
                 renderItemArrow={() => null}
                 renderDragBetweenLine={({ draggingPosition, lineProps }) => (

@@ -1,32 +1,45 @@
-import { TreeItemIndex } from "react-complex-tree";
+import { TreeItem, TreeItemIndex } from "react-complex-tree";
 
 /**
- * Group 트리 아이템 데이터 타입
+ * Group 데이터 구조 (Mendix 엔티티 대응)
  */
-export interface GroupTreeItemData {
-    /** 그룹 ID (Groupld) */
-    id: string;
-    /** 그룹 이름 (GroupName) */
-    name: string;
-    /** 부모 그룹 ID (ParentId) - null이면 루트 */
-    parentId: string | null;
-    /** 정렬 순서 (SortNo) */
-    sortNo: number;
-    /** 깊이 (Depth) */
-    depth: number;
-    /** 설명 (Description) */
+export interface GroupItemData {
+    // SyGroup Entity 속성
+    groupId: string;
+    groupName: string;
     description?: string;
-    /** 활성화 여부 (EnableTF) */
-    enabled: boolean;
+    parentId: string | null;
+    depth: number;
+    sortNo: number;
+    leftNo?: number;
+    rightNo?: number;
+    displayYn?: string;
+    enabledTF: boolean;
+
+    // Mendix Object
+    guid?: string;
+
+    // 호환성을 위한 legacy prop (react-complex-tree 등에서 사용 시 필요할 수 있음)
+    // id: string; // groupId와 동일
+    // name: string; // groupName과 동일
+}
+
+/**
+ * React Complex Tree용 Group Item
+ */
+export interface GroupTreeItem extends TreeItem<GroupItemData> {
+    index: TreeItemIndex;
+    isFolder: boolean;
+    children?: TreeItemIndex[];
+    data: GroupItemData;
+    canMove: boolean;
+    canRename: boolean;
 }
 
 /**
  * Group 트리 아이템 맵
- * key: TreeItemIndex (string), value: TreeItem<GroupTreeItemData>
  */
-export type GroupTreeItemMap = {
-    [itemId: TreeItemIndex]: import("react-complex-tree").TreeItem<GroupTreeItemData>;
-};
+export type GroupTreeItemMap = Record<TreeItemIndex, GroupTreeItem>;
 
 /**
  * 루트 아이템 ID
@@ -34,25 +47,17 @@ export type GroupTreeItemMap = {
 export const GROUP_ROOT_ID: TreeItemIndex = "__group_root__";
 
 /**
- * localStorage에 저장되는 변경사항 타입
+ * 변경사항 타입
  */
 export interface GroupTreeChange {
-    /** 그룹 ID */
     groupId: string;
-    /** 새로운 부모 ID (null이면 루트) */
     parentId: string | null;
-    /** 새로운 정렬 순서 */
     sortNo: number;
-    /** 새로운 깊이 */
     depth: number;
+    type?: "create" | "update" | "delete" | "move";
 }
 
-/**
- * localStorage에 저장되는 전체 변경사항 타입
- */
 export interface GroupTreeChanges {
-    /** 변경사항 배열 */
     changes: GroupTreeChange[];
-    /** 타임스탬프 */
     timestamp: string;
 }

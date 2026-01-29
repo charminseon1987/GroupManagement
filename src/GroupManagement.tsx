@@ -1,4 +1,5 @@
-import { ReactElement, createElement, useState, useCallback, useEffect } from "react";
+import { ReactElement, createElement, useState, useCallback, useEffect, useMemo } from "react";
+import { Big } from "big.js";
 import { GroupManagementContainerProps } from "../typings/GroupManagementProps";
 import { GroupTreeContainer } from "./components/GroupTree/GroupTreeContainer";
 import { useGroupTreeData } from "./hooks/useGroupTreeData";
@@ -6,9 +7,40 @@ import { useLocalStorageSync } from "./hooks/useLocalStorageSync";
 import { GroupTreeItemMap } from "./types/groupTree.types";
 import "./ui/GroupManagement.css";
 
-export function GroupManagement({ groupDataSource }: GroupManagementContainerProps): ReactElement {
+export function GroupManagement(props: GroupManagementContainerProps): ReactElement {
+    const {
+        groupDataSource,
+        groupNameAttr,
+        parentIdAttr,
+        sortNoAttr,
+        depthAttr,
+        descriptionAttr,
+        enableAttr,
+        groupIdAttr,
+        onTreeChange
+    } = props;
+
+    // Mendix attribute configuration memoization
+    const config = useMemo(() => ({
+        groupNameAttr,
+        parentIdAttr,
+        sortNoAttr,
+        depthAttr,
+        descriptionAttr,
+        enableAttr,
+        groupIdAttr
+    }), [
+        groupNameAttr,
+        parentIdAttr,
+        sortNoAttr,
+        depthAttr,
+        descriptionAttr,
+        enableAttr,
+        groupIdAttr
+    ]);
+
     // Mendix datasource에서 데이터를 트리 형식으로 변환 (베이스 트리)
-    const baseTree = useGroupTreeData(groupDataSource?.items);
+    const baseTree = useGroupTreeData(groupDataSource?.items, config);
 
     // 표시/조작용 트리 상태 (드래그 결과가 즉시 반영되도록 유지)
     const [treeItems, setTreeItems] = useState<GroupTreeItemMap>(baseTree);
@@ -43,108 +75,82 @@ export function GroupManagement({ groupDataSource }: GroupManagementContainerPro
                     return;
                 }
 
-                // Promise.all을 사용하여 모든 객체를 로드하고 수정
+                // 모든 변경사항에 대해 개별 Promise 생성
                 const loadAndModifyPromises = changes.map(change => {
-                    return new Promise<any>((resolve, _reject) => {
-                        // groupDataSource.items에서 groupId로 객체 찾기
+                    return new Promise<any>((resolve) => {
+                        // 1. groupDataSource에서 객체 찾기
                         const item = groupDataSource.items?.find((obj: any) => {
-                            // 여러 방법으로 ID 추출 시도
-                            let id: string | undefined;
-                            const objAny = obj as any;
-                            if (typeof objAny.get === "function") {
-                                const groupIdValue = objAny.get("Groupld");
-                                id = typeof groupIdValue === "string" 
-                                    ? groupIdValue 
-                                    : (groupIdValue?.value != null ? String(groupIdValue.value) : undefined);
+                            // groupIdAttr prop이 있으면 그것을 우선 사용
+                            if (groupIdAttr) {
+                                try {
+                                    const val = groupIdAttr.get(obj).value;
+                                    if (val != null && String(val) === change.groupId) return true;
+                                } catch (e) { }
                             }
-                            if (!id) {
-                                id = objAny.Groupld?.value || objAny.Groupld || objAny.id?.value || objAny.id;
+
+                            // 차선책: 일반적인 ID 속성명으로 찾기
+                            if (typeof obj.get === "function") {
+                                const idNames = ["Groupld", "GroupId", "groupid", "groupId"];
+                                for (const name of idNames) {
+                                    try {
+                                        const val = obj.get(name);
+                                        const stringVal = val != null ? (typeof val === "object" ? String(val.value) : String(val)) : null;
+                                        if (stringVal === change.groupId) return true;
+                                    } catch (e) { }
+                                }
                             }
-                            return id === change.groupId;
+
+                            // 최후의 수단: Mendix GUID 매칭
+                            return obj.id === change.groupId;
                         }) as any;
 
                         if (!item) {
-                            console.warn(`Item not found for groupId: ${change.groupId}`);
+                            console.warn(`[Commit] Item not found for groupId: ${change.groupId}`);
                             resolve(null);
                             return;
                         }
 
-                        // GUID 추출
+                        // 2. Mendix 객체 로드 및 수정
                         const guid = item.id || item.guid || item.GUID;
-                        if (!guid) {
-                            console.warn(`GUID not found for item:`, item);
-                            resolve(null);
-                            return;
-                        }
-
-                        // 실제 객체가 이미 있는지 확인 (get() 메서드가 있고 set() 메서드도 있는 경우)
-                        if (typeof item.get === "function" && typeof item.set === "function") {
-                            // 이미 실제 객체인 경우 직접 수정
+                        const modifyObject = (mxobj: any) => {
                             try {
-                                // 디버깅: 사용 가능한 속성 확인
-                                if (process.env.NODE_ENV === "development" && changes.indexOf(change) === 0) {
-                                    console.log("Mendix object properties:", {
-                                        hasGet: typeof item.get === "function",
-                                        hasSet: typeof item.set === "function",
-                                        availableAttrs: Object.keys(item).filter(k => !k.startsWith("_") && typeof item[k] !== "function"),
-                                        sampleGet: item.get ? (() => {
-                                            try {
-                                                const attrs = ["GroupName", "groupName", "Group_Name", "Name", "name"];
-                                                const found: any = {};
-                                                attrs.forEach(attr => {
-                                                    try {
-                                                        const val = item.get(attr);
-                                                        if (val !== undefined) found[attr] = val;
-                                                    } catch (e) {}
-                                                });
-                                                return found;
-                                            } catch (e) {
-                                                return "error";
-                                            }
-                                        })() : "no get method"
-                                    });
-                                }
-                                
-                                item.set("ParentId", change.parentId);
-                                item.set("SortNo", change.sortNo);
-                                item.set("Depth", change.depth);
-                                resolve(item);
+                                const attrs = mxobj.getAttributes();
+
+                                // 대소문자 구분 없이 속성명 매칭하여 값 설정 시도
+                                const setAttr = (search: string, value: any) => {
+                                    const exact = attrs.find((a: string) => a.toLowerCase() === search.toLowerCase());
+                                    if (exact) {
+                                        mxobj.set(exact, value);
+                                        return true;
+                                    }
+                                    return false;
+                                };
+
+                                setAttr("ParentId", change.parentId);
+                                setAttr("SortNo", new Big(change.sortNo));
+                                setAttr("Depth", new Big(change.depth));
+
+                                console.log(`[Commit] Set values for ${change.groupId}: parent=${change.parentId}, sort=${change.sortNo}, depth=${change.depth}`);
+                                resolve(mxobj);
                             } catch (error) {
-                                console.error(`Failed to modify object directly:`, error);
+                                console.error(`[Commit] Failed to set values for ${change.groupId}:`, error);
                                 resolve(null);
                             }
-                            return;
-                        }
+                        };
 
-                        // mx.data.get()으로 실제 객체 로드
-                        // Mendix API: mx.data.get({ guid: string, callback: function, error: function })
-                        if (mx?.data?.get) {
+                        // 객체가 이미 로드되어 있으면 바로 수정, 아니면 로드 후 수정
+                        if (typeof item.get === "function" && typeof item.set === "function") {
+                            modifyObject(item);
+                        } else if (mx?.data?.get) {
                             mx.data.get({
                                 guid: guid,
-                                callback: (mxobj: any) => {
-                                    if (!mxobj) {
-                                        console.warn(`Failed to load object with GUID: ${guid}`);
-                                        resolve(null);
-                                        return;
-                                    }
-                                    try {
-                                        // 속성 변경
-                                        mxobj.set("ParentId", change.parentId);
-                                        mxobj.set("SortNo", change.sortNo);
-                                        mxobj.set("Depth", change.depth);
-                                        resolve(mxobj);
-                                    } catch (error) {
-                                        console.error(`Failed to modify object ${guid}:`, error);
-                                        resolve(null);
-                                    }
-                                },
-                                error: (error: any) => {
-                                    console.error(`Failed to load object ${guid}:`, error);
+                                callback: modifyObject,
+                                error: (err: any) => {
+                                    console.error(`[Commit] Failed to load object ${guid}:`, err);
                                     resolve(null);
                                 }
                             });
                         } else {
-                            console.error("mx.data.get is not available");
                             resolve(null);
                         }
                     });
@@ -176,7 +182,7 @@ export function GroupManagement({ groupDataSource }: GroupManagementContainerPro
                                     reject(error);
                                 }
                             });
-                            
+
                             // Promise를 반환하는 경우 (Mendix 10+)
                             if (commitResult instanceof Promise) {
                                 commitResult
@@ -193,7 +199,7 @@ export function GroupManagement({ groupDataSource }: GroupManagementContainerPro
                     });
 
                     await commitPromise;
-                    
+
                     // 성공 시 데이터 소스 리프레시하여 최신 데이터 로드
                     // 약간의 지연을 두어 서버가 커밋을 처리할 시간 제공
                     setTimeout(() => {
@@ -212,15 +218,20 @@ export function GroupManagement({ groupDataSource }: GroupManagementContainerPro
                     }
                 }
             }
+            if (onTreeChange && onTreeChange.canExecute && !onTreeChange.isExecuting) {
+                const changesJson = JSON.stringify(changes);
+                onTreeChange.execute({ changesJson });
+            }
+
         },
-        [saveChanges, groupDataSource]
+        [saveChanges, groupDataSource, onTreeChange]
     );
 
     // 트리 변경 핸들러 (드래그 등)
     const handleTreeChange = useCallback(
         (newItems: GroupTreeItemMap) => {
             const changes = getChangesList(newItems, previousTreeItems);
-            
+
             // 변경사항이 없으면 바로 반영
             if (changes.length === 0) {
                 setTreeItems(newItems);
@@ -275,8 +286,82 @@ export function GroupManagement({ groupDataSource }: GroupManagementContainerPro
 
     // 하위 폴더 추가 핸들러
     const handleAddSubFolder = useCallback((parentId: string | null) => {
-        console.log("Add sub folder to:", parentId);
-    }, []);
+        if (!parentId) return;
+
+        // 임시 ID 생성 (실제 ID는 저장 후 서버에서 생성되거나 GUID 사용)
+        const tempId = `new_folder_${Date.now()}`;
+        const newItems = { ...treeItems };
+        const parent = newItems[parentId];
+
+        // 새 아이템 생성
+        // 부모의 depth + 1
+        const newDepth = (parent?.data.depth ?? 0) + 1;
+
+        // 형제들 중 가장 마지막 sortNo + 1
+        let maxSortNo = 0;
+        if (parent?.children) {
+            parent.children.forEach(childId => {
+                const child = newItems[childId];
+                if (child && child.data.sortNo > maxSortNo) {
+                    maxSortNo = child.data.sortNo;
+                }
+            });
+        }
+
+        newItems[tempId] = {
+            index: tempId,
+            isFolder: true,
+            children: [],
+            data: {
+                groupId: tempId,
+                groupName: "New Folder",
+                parentId: parentId,
+                sortNo: maxSortNo + 1,
+                depth: newDepth,
+                description: "",
+                enabledTF: true,
+                leftNo: 0,
+                rightNo: 0,
+                displayYn: "Y"
+            },
+            canMove: true,
+            canRename: true
+        };
+
+        // 부모의 자식 목록에 추가
+        if (parent) {
+            const newChildren = [...(parent.children || []), tempId];
+            newItems[parentId] = {
+                ...parent,
+                children: newChildren
+            };
+
+            // 트리 변경 통지 및 저장
+            // 여기서는 단순 추가이므로 별도의 처리 로직이 필요할 수 있음
+            // 현재 구조상 handleTreeChange를 통해 변경사항을 감지하고 저장하도록 유도
+
+            // 변경사항 계산을 위해 change 리스트 직접 생성
+            const change = {
+                groupId: tempId,
+                parentId: parentId,
+                sortNo: maxSortNo + 1,
+                depth: newDepth,
+                type: "create" // 새로 추가됨을 표시 (실제 구현에서는 이 타입을 처리해야 함)
+            };
+            console.log("Created new folder structure:", change);
+
+            // Mendix 객체 생성 로직은 복잡하므로,
+            // 여기서는 간단히 사용자에게 알림만 주거나,
+            // 실제 구현에서는 Mendix Microflow를 호출하여 객체를 생성하고 리프레시해야 함
+
+            setTreeItems(newItems);
+
+            const mx = (window as any).mx;
+            if (mx && mx.ui && mx.ui.info) {
+                mx.ui.info("새 폴더가 트리에 추가되었습니다. 저장을 위해 '변경사항 저장' 프로세스가 필요할 수 있습니다.", true);
+            }
+        }
+    }, [treeItems]);
 
     if (!groupDataSource) {
         return (
