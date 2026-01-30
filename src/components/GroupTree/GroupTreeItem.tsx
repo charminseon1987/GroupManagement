@@ -1,4 +1,4 @@
-import { ReactElement, createElement, ReactNode } from "react";
+import { ReactElement, createElement, ReactNode, useState, useEffect, useRef } from "react";
 import { TreeItem, TreeItemRenderContext, TreeItemIndex } from "react-complex-tree";
 import classNames from "classnames";
 import { GroupItemData } from "../../types/groupTree.types";
@@ -14,6 +14,10 @@ interface GroupTreeItemProps {
     children?: ReactNode;
     onRemove: (itemId: TreeItemIndex) => void;
     onAddSubFolder?: (parentId: TreeItemIndex) => void;
+    onRename?: (item: TreeItem<GroupItemData>, name: string) => void;
+    isRenaming?: boolean;
+    onStartRenaming?: () => void;
+    onStopRenaming?: () => void;
 }
 
 /**
@@ -22,26 +26,44 @@ interface GroupTreeItemProps {
 export function GroupTreeItemRenderer({
     item,
     context,
-    children
+    children,
+    onRemove,
+    onAddSubFolder,
+    onRename,
+    isRenaming,
+    onStartRenaming,
+    onStopRenaming
 }: GroupTreeItemProps): ReactElement {
-    const isFolder = item.isFolder ?? true; // Group은 모두 폴더
+    const [tempName, setTempName] = useState(item.data.groupName);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    const isFolder = item.isFolder ?? true;
     const hasChildren = item.children && item.children.length > 0;
 
-    // 뎁스 레벨 계산
-    // depth: 데이터베이스의 실제 depth 값 (1=루트 레벨, 2=1단계 하위, 3=2단계 하위...)
-    // visualDepth: 화면에 표시할 들여쓰기 레벨 (0=루트, 1=1단계 하위, 2=2단계 하위...)
     const depth = item.data.depth ?? 1;
-    const visualDepth = Math.max(0, depth - 1); // depth=1이면 visualDepth=0 (루트), depth=2이면 visualDepth=1 (1단계 하위)
+    const visualDepth = Math.max(0, depth - 1);
 
-    // 디버깅: 뎁스 정보 출력
-    if (process.env.NODE_ENV === "development" && depth > 1) {
-        console.log("Tree item depth:", {
-            groupName: item.data.groupName,
-            depth,
-            visualDepth,
-            parentId: item.data.parentId
-        });
-    }
+    // 이름 변경 상태 돌입 시 임시 이름 초기화 및 포커스
+    useEffect(() => {
+        if (isRenaming) {
+            setTempName(item.data.groupName);
+            setTimeout(() => inputRef.current?.focus(), 50);
+        }
+    }, [isRenaming, item.data.groupName]);
+
+    const handleRenameSubmit = () => {
+        if (onRename) {
+            onRename(item, tempName);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === "Enter") {
+            handleRenameSubmit();
+        } else if (e.key === "Escape") {
+            if (onStopRenaming) onStopRenaming();
+        }
+    };
 
     return (
         <div
@@ -56,8 +78,6 @@ export function GroupTreeItemRenderer({
             })}
             data-rct-item-id={item.index}
         >
-
-            {/* 타이틀 바 */}
             <div
                 {...context.itemContainerWithoutChildrenProps}
                 {...context.interactiveElementProps}
@@ -72,56 +92,100 @@ export function GroupTreeItemRenderer({
                 })}
                 style={{ cursor: item.data.enabledTF === false ? 'not-allowed' : 'pointer' }}
                 onClick={() => {
-                    // 비활성화된 아이템 선택 방지 (옵션)
-                    /*
-                    if (item.data.enabledTF === false) {
-                        return;
-                    }
-                    */
                     context.focusItem();
                 }}
             >
-                {/* 드래그 핸들 */}
                 <div className="group-tree-drag-handle">
                     <DragHandleIcon size={14} />
                 </div>
 
-                {/* 확장/축소 화살표 (폴더이고 자식이 있는 경우만) */}
-                {isFolder && hasChildren && (
-                    <button
-                        type="button"
-                        className="group-tree-expand-btn"
-                        onClick={e => {
-                            e.stopPropagation();
-                            if (context.isExpanded) {
-                                context.collapseItem();
-                            } else {
-                                context.expandItem();
-                            }
-                        }}
-                        title={`하위 폴더 추가 (현재: ${item.data.groupName})`}
-                        aria-label={context.isExpanded ? "축소" : "확장"}
-                    >
-                        <ChevronIcon isExpanded={context.isExpanded} size={14} />
-                    </button>
-                )}
+                <div className="group-tree-item-content">
+                    <div className="group-tree-item-info">
+                        {isFolder && hasChildren && (
+                            <button
+                                type="button"
+                                className="group-tree-expand-btn"
+                                onClick={e => {
+                                    e.stopPropagation();
+                                    if (context.isExpanded) {
+                                        context.collapseItem();
+                                    } else {
+                                        context.expandItem();
+                                    }
+                                }}
+                                aria-label={context.isExpanded ? "축소" : "확장"}
+                            >
+                                <ChevronIcon isExpanded={context.isExpanded} size={14} />
+                            </button>
+                        )}
 
-                {/* 자식이 없는 폴더의 경우 빈 공간 유지 */}
-                {isFolder && !hasChildren && (
-                    <div style={{ width: 24, height: 24, marginRight: 4 }} />
-                )}
+                        {isFolder && !hasChildren && (
+                            <div style={{ width: 18, height: 18 }} />
+                        )}
 
-                {/* 아이콘 */}
-                {isFolder && (
-                    <FolderIcon isOpen={context.isExpanded && hasChildren} size={18} />
-                )}
+                        {isFolder && (
+                            <FolderIcon isOpen={context.isExpanded && hasChildren} size={18} />
+                        )}
 
-                {/* 이름 */}
-                <span className="group-tree-item-name">{item.data.groupName}</span>
-                {!item.data.enabledTF && <span className="group-tree-item-disabled-badge">(비활성)</span>}
+                        {isRenaming ? (
+                            <input
+                                ref={inputRef}
+                                className="group-tree-rename-input"
+                                value={tempName}
+                                onChange={e => setTempName(e.target.value)}
+                                onBlur={handleRenameSubmit}
+                                onKeyDown={handleKeyDown}
+                                onClick={e => e.stopPropagation()}
+                            />
+                        ) : (
+                            <span
+                                className="group-tree-item-name"
+                                onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    if (onStartRenaming) onStartRenaming();
+                                }}
+                            >
+                                {item.data.groupName || "(이름 없음)"}
+                            </span>
+                        )}
+                        {!item.data.enabledTF && <span className="group-tree-item-disabled-badge">(비활성)</span>}
+                    </div>
+                </div>
+
+                <div className="group-tree-item-actions">
+                    {onAddSubFolder && (
+                        <button
+                            className="group-tree-action-btn group-tree-add-btn"
+                            onClick={e => {
+                                e.stopPropagation();
+                                onAddSubFolder(item.index);
+                            }}
+                            title="하위 그룹 추가"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                    )}
+                    {onRemove && (
+                        <button
+                            className="group-tree-action-btn group-tree-delete-btn"
+                            onClick={e => {
+                                e.stopPropagation();
+                                onRemove(item.index);
+                            }}
+                            title="그룹 삭제"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                            </svg>
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {/* 자식 컨테이너 */}
             {context.isExpanded && item.children && item.children.length > 0 && (
                 <div className="group-tree-children">
                     {children}

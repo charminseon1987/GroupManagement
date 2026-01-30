@@ -21,13 +21,16 @@ function computeChanges(items: GroupTreeItemMap, previousItems: GroupTreeItemMap
             !previousItem ||
             previousItem.data.parentId !== currentItem.data.parentId ||
             previousItem.data.sortNo !== currentItem.data.sortNo ||
-            previousItem.data.depth !== currentItem.data.depth
+            previousItem.data.depth !== currentItem.data.depth ||
+            previousItem.data.groupName !== currentItem.data.groupName
         ) {
             changes.push({
                 groupId: currentItem.data.groupId,
                 parentId: currentItem.data.parentId,
                 sortNo: currentItem.data.sortNo,
-                depth: currentItem.data.depth
+                depth: currentItem.data.depth,
+                groupName: currentItem.data.groupName,
+                type: currentItem.data.isNew ? "create" : "update"
             });
         }
     });

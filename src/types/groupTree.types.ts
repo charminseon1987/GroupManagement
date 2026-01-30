@@ -16,12 +16,11 @@ export interface GroupItemData {
     displayYn?: string;
     enabledTF: boolean;
 
+    // Local-only flag for creation
+    isNew?: boolean;
+
     // Mendix Object
     guid?: string;
-
-    // 호환성을 위한 legacy prop (react-complex-tree 등에서 사용 시 필요할 수 있음)
-    // id: string; // groupId와 동일
-    // name: string; // groupName과 동일
 }
 
 /**
@@ -54,6 +53,7 @@ export interface GroupTreeChange {
     parentId: string | null;
     sortNo: number;
     depth: number;
+    groupName?: string;
     type?: "create" | "update" | "delete" | "move";
 }
 

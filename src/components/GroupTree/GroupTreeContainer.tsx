@@ -23,6 +23,10 @@ interface GroupTreeContainerProps {
     onTreeChange: (newItems: GroupTreeItemMap) => void;
     onRemoveItem: (itemId: TreeItemIndex) => void;
     onAddSubFolder?: (parentId: TreeItemIndex | null) => void;
+    onRenameItem: (item: TreeItem<GroupItemData>, name: string) => void;
+    renamingItemId: TreeItemIndex | null;
+    onStartRenaming: (itemId: TreeItemIndex) => void;
+    onStopRenaming: () => void;
 }
 
 /**
@@ -32,7 +36,11 @@ export function GroupTreeContainer({
     treeItems,
     onTreeChange,
     onRemoveItem,
-    onAddSubFolder
+    onAddSubFolder,
+    onRenameItem,
+    renamingItemId,
+    onStartRenaming,
+    onStopRenaming
 }: GroupTreeContainerProps): ReactElement {
     // View state
     const [focusedItem, setFocusedItem] = useState<TreeItemIndex | undefined>();
@@ -103,16 +111,7 @@ export function GroupTreeContainer({
             const newItems = { ...treeItems };
             const draggedIds = items.map(item => item.index);
 
-            // 디버깅: 드롭 정보 로그
-            console.log("Drop handler called:", {
-                draggedItems: draggedIds,
-                targetType: target.targetType,
-                targetItem: target.targetType === "item" ? target.targetItem : undefined,
-                parentItem: target.targetType === "between-items" ? target.parentItem : undefined,
-                childIndex: target.targetType === "between-items" ? target.childIndex : undefined
-            });
-
-            // 타겟 정보 결정
+            // 1. 타겟 부모 및 삽입 인덱스 결정
             let targetParentId: TreeItemIndex;
             let targetIndex: number;
 
@@ -120,125 +119,110 @@ export function GroupTreeContainer({
                 targetParentId = GROUP_ROOT_ID;
                 targetIndex = newItems[GROUP_ROOT_ID].children?.length || 0;
             } else if (target.targetType === "item") {
-                // 아이템 위에 드롭 -> 해당 아이템을 부모로 설정
                 targetParentId = target.targetItem;
                 targetIndex = newItems[targetParentId].children?.length || 0;
             } else {
-                // 아이템 사이(between-items) -> 부모 아이템의 특정 인덱스에 삽입
                 targetParentId = target.parentItem;
                 targetIndex = target.childIndex;
             }
 
-            // 모든 드래그된 아이템에 대해 처리
-            draggedIds.forEach((draggedId, offsetIndex) => {
+            // 2. 소스 부모(들)에서 아이템 제거
+            draggedIds.forEach(draggedId => {
                 const draggedItem = newItems[draggedId];
                 if (!draggedItem) return;
 
-                // 이전 부모에서 제거
                 const oldParentId = draggedItem.data.parentId ?? GROUP_ROOT_ID;
                 const oldParent = newItems[oldParentId];
                 if (oldParent && oldParent.children) {
                     const oldIndex = oldParent.children.indexOf(draggedId);
-                    newItems[oldParentId] = {
-                        ...oldParent,
-                        children: oldParent.children.filter(id => id !== draggedId)
-                    };
 
                     // 같은 부모 내에서 이동하고, 이전 위치가 새 위치보다 앞에 있었다면 인덱스 조정
                     if (oldParentId === targetParentId && oldIndex < targetIndex) {
                         targetIndex--;
                     }
+
+                    newItems[oldParentId] = {
+                        ...oldParent,
+                        children: oldParent.children.filter(id => id !== draggedId)
+                    };
+
+                    // 소스 부모의 남은 자식들 SortNo 재정렬
+                    newItems[oldParentId].children?.forEach((childId, idx) => {
+                        const child = newItems[childId];
+                        if (child) {
+                            newItems[childId] = {
+                                ...child,
+                                data: { ...child.data, sortNo: idx }
+                            };
+                        }
+                    });
                 }
+            });
 
-                // 새 부모에 추가
-                const newParentId = targetParentId === GROUP_ROOT_ID ? null : String(targetParentId);
-                const newParent = newItems[targetParentId];
+            // 3. 타겟 부모의 children 배열 업데이트 및 SortNo 재정렬
+            const targetParent = newItems[targetParentId];
+            if (targetParent) {
+                const currentChildren = [...(targetParent.children || [])];
 
-                if (newParent) {
-                    // 부모의 children 배열이 없으면 생성
-                    if (!newParent.children) {
-                        newParent.children = [];
-                    }
-                    const newChildren = [...newParent.children];
-                    const adjustedIndex = Math.min(targetIndex + offsetIndex, newChildren.length);
+                // 지정된 위치에 드래그된 아이템들 삽입
+                currentChildren.splice(targetIndex, 0, ...draggedIds);
 
-                    // 중복 방지: 이미 children에 있으면 제거 후 다시 추가
-                    const existingIndex = newChildren.indexOf(draggedId);
-                    if (existingIndex !== -1) {
-                        newChildren.splice(existingIndex, 1);
-                        // 인덱스 조정
-                        if (existingIndex < adjustedIndex) {
-                            targetIndex--;
+                // 타겟 부모의 모든 자식에 대해 SortNo 새로 할당 (0, 1, 2...)
+                currentChildren.forEach((childId, idx) => {
+                    const child = newItems[childId];
+                    if (child) {
+                        const isDragged = draggedIds.includes(childId);
+
+                        // 드래그된 아이템인 경우 parentId와 depth도 같이 갱신
+                        if (isDragged) {
+                            const newParentId = targetParentId === GROUP_ROOT_ID ? null : String(targetParentId);
+                            const newDepth = targetParentId === GROUP_ROOT_ID
+                                ? 1
+                                : calculateDepth(newItems, targetParentId) + 1;
+
+                            newItems[childId] = {
+                                ...child,
+                                data: {
+                                    ...child.data,
+                                    parentId: newParentId,
+                                    depth: newDepth,
+                                    sortNo: idx
+                                }
+                            };
+
+                            // 자식들의 depth도 재귀적으로 업데이트
+                            const updateDescendantsDepth = (pid: TreeItemIndex, pDepth: number) => {
+                                const parentItem = newItems[pid];
+                                if (parentItem && parentItem.children) {
+                                    parentItem.children.forEach(cid => {
+                                        const cItem = newItems[cid];
+                                        if (cItem) {
+                                            const cDepth = pDepth + 1;
+                                            newItems[cid] = {
+                                                ...cItem,
+                                                data: { ...cItem.data, depth: cDepth }
+                                            };
+                                            updateDescendantsDepth(cid, cDepth);
+                                        }
+                                    });
+                                }
+                            };
+                            updateDescendantsDepth(childId, newDepth);
+                        } else {
+                            // 단순 순서 변경인 경우 sortNo만 업데이트
+                            newItems[childId] = {
+                                ...child,
+                                data: { ...child.data, sortNo: idx }
+                            };
                         }
                     }
-
-                    newChildren.splice(adjustedIndex, 0, draggedId);
-
-                    newItems[targetParentId] = {
-                        ...newParent,
-                        children: newChildren
-                    };
-                }
-
-                // 드래그된 아이템의 parentId 및 depth 업데이트
-                const newDepth = targetParentId === GROUP_ROOT_ID
-                    ? 1
-                    : calculateDepth(newItems, targetParentId) + 1;
-
-                newItems[draggedId] = {
-                    ...draggedItem,
-                    data: {
-                        ...draggedItem.data,
-                        parentId: newParentId,
-                        depth: newDepth,
-                        sortNo: targetIndex + offsetIndex
-                    }
-                };
-
-                // 자식 아이템들의 depth도 재귀적으로 업데이트
-                const updateChildrenDepth = (
-                    items: GroupTreeItemMap,
-                    parentId: TreeItemIndex,
-                    parentDepth: number
-                ) => {
-                    const parent = items[parentId];
-                    if (parent && parent.children) {
-                        parent.children.forEach(childId => {
-                            const child = items[childId];
-                            if (child) {
-                                const newChildDepth = parentDepth + 1;
-                                items[childId] = {
-                                    ...child,
-                                    data: {
-                                        ...child.data,
-                                        depth: newChildDepth
-                                    }
-                                };
-                                updateChildrenDepth(items, childId, newChildDepth);
-                            }
-                        });
-                    }
-                };
-
-                updateChildrenDepth(newItems, draggedId, newDepth);
-
-                console.log("Updated item with children:", {
-                    draggedId,
-                    newParentId,
-                    newDepth,
-                    sortNo: targetIndex + offsetIndex,
-                    newParentChildren: newItems[targetParentId]?.children
                 });
-            });
 
-            console.log("Final tree structure:", {
-                rootChildren: newItems[GROUP_ROOT_ID]?.children,
-                updatedItems: draggedIds.map(id => ({
-                    id,
-                    parentId: newItems[id]?.data.parentId,
-                    depth: newItems[id]?.data.depth
-                }))
-            });
+                newItems[targetParentId] = {
+                    ...targetParent,
+                    children: currentChildren
+                };
+            }
 
             onTreeChange(newItems);
         },
@@ -265,23 +249,6 @@ export function GroupTreeContainer({
         setSelectedItems(items);
     }, []);
 
-    // 아이템 이름 변경
-    const handleRenameItem = useCallback(
-        (item: TreeItem<GroupItemData>, name: string): void => {
-            const newItems = {
-                ...treeItems,
-                [item.index]: {
-                    ...treeItems[item.index],
-                    data: {
-                        ...treeItems[item.index].data,
-                        groupName: name
-                    }
-                }
-            };
-            onTreeChange(newItems);
-        },
-        [treeItems, onTreeChange]
-    );
 
     // 아이템 렌더러
     const renderItem = useCallback(
@@ -297,10 +264,14 @@ export function GroupTreeContainer({
                     children={children}
                     onRemove={onRemoveItem}
                     onAddSubFolder={onAddSubFolder}
+                    onRename={onRenameItem}
+                    isRenaming={renamingItemId === item.index}
+                    onStartRenaming={() => onStartRenaming(item.index)}
+                    onStopRenaming={onStopRenaming}
                 />
             );
         },
-        [onRemoveItem, onAddSubFolder, treeItems]
+        [onRemoveItem, onAddSubFolder, treeItems, renamingItemId, onRenameItem, onStartRenaming, onStopRenaming]
     );
 
     // viewState 메모이제이션
@@ -331,7 +302,7 @@ export function GroupTreeContainer({
                 onCollapseItem={handleCollapseItem}
                 onFocusItem={handleFocusItem}
                 onSelectItems={handleSelectItems}
-                onRenameItem={handleRenameItem}
+                onRenameItem={onRenameItem}
                 canRename={true}
                 canSearch={false}
                 canSearchByStartingTyping={false}
