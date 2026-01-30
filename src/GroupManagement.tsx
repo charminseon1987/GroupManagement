@@ -250,6 +250,9 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                     };
                 }
                 delete newItems[itemId];
+
+                // 새로운 아이템인 경우 롤백이 필요할 수도 있지만, 
+                // 여기서는 단순히 트리 상태에서 제거하고 handleTreeChange를 통해 전파
                 handleTreeChange(newItems);
             }
         },
@@ -301,17 +304,19 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
 
         setTreeItems(newItems);
         setRenamingItemId(tempId);
-
-        const mx = (window as any).mx;
-        if (mx?.ui?.info) {
-            mx.ui.info("새 폴더가 추가되었습니다. 이름을 입력해주세요.", true);
-        }
     }, [treeItems]);
 
     // 아이템 이름 변경 핸들러 (Lifting)
     const handleRenameItem = useCallback(
         (item: any, name: string): void => {
+            const isNewItem = item.data.isNew === true;
+
+            // 이름이 없거나 빈 칸만 있는 경우 처리
             if (!name || name.trim() === "") {
+                if (isNewItem) {
+                    // 새로 추가된 항목인데 이름을 안 적었으면 트리에서 삭제
+                    handleRemoveItem(item.index as string);
+                }
                 setRenamingItemId(null);
                 return;
             }
@@ -329,7 +334,7 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
             setRenamingItemId(null);
             handleTreeChange(newItems);
         },
-        [treeItems, handleTreeChange]
+        [treeItems, handleTreeChange, handleRemoveItem]
     );
 
     if (!groupDataSource) {
