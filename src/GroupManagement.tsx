@@ -99,7 +99,18 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                                         setAttr("GroupName", change.groupName);
                                     }
 
-                                    console.log(`[Commit] Prepared object for ${change.groupId}`);
+                                    // 신규 생성 시 기본값 또는 특정 필드 설정
+                                    if (change.type === "create") {
+                                        setAttr("EnableTF", true);
+                                        // GroupId가 필요한 경우 설정 (만약 Mendix에서 자동 생성하지 않는 경우)
+                                        if (change.groupId && !change.groupId.startsWith("new_folder_")) {
+                                            setAttr("GroupId", change.groupId);
+                                        }
+                                    } else if (change.enabledTF !== undefined) {
+                                        setAttr("EnableTF", change.enabledTF);
+                                    }
+
+                                    console.log(`[Commit] Prepared object for ${change.groupId} (Type: ${change.type})`);
                                     resolve(mxobj);
                                 } catch (error) {
                                     console.error(`[Commit] Failed to set values:`, error);
@@ -108,22 +119,78 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                             };
 
                             if (change.type === "create") {
-                                const firstItem = (groupDataSource.items && groupDataSource.items.length > 0) ? groupDataSource.items[0] : null;
-                                if (firstItem) {
-                                    const entityName = (firstItem as any).entity || (firstItem as any).getEntity?.();
-                                    if (entityName) {
-                                        mx.data.create({
-                                            entity: entityName,
-                                            callback: modifyObject,
-                                            error: (err: any) => {
-                                                console.error(`[Commit] Creation failed:`, err);
-                                                resolve(null);
+                                // 엔티티 명칭 찾기 (데이터가 없을 때를 대비한 강화된 로직)
+                                let entityName: string | undefined;
+
+                                // 1. 기존 아이템에서 가져오기 (Symbol 기반 접근 포함)
+                                if (groupDataSource.items && groupDataSource.items.length > 0) {
+                                    const firstItem = groupDataSource.items[0];
+
+                                    // 1-1. 공개 API 시도 (Pluggable Widgets 표준)
+                                    entityName = (firstItem as any).entity || (firstItem as any).getEntity?.();
+
+                                    // 1-2. Symbols 확인 (User Log 기반: Symbol(mxObject) 대응)
+                                    if (!entityName) {
+                                        try {
+                                            const symbols = Object.getOwnPropertySymbols(firstItem);
+                                            for (const sym of symbols) {
+                                                if (sym.toString().toLowerCase().includes("mxobject")) {
+                                                    const mxObj = (firstItem as any)[sym];
+                                                    entityName = mxObj?.getEntity?.() || mxObj?.entity;
+                                                    if (entityName) break;
+                                                }
                                             }
-                                        });
-                                        return;
+                                        } catch (e) {
+                                            console.warn("[Commit] Symbol access failed", e);
+                                        }
                                     }
                                 }
-                                resolve(null);
+
+                                // 2. Fallback: 속성 정보에서 추론 (Mendix 내부 API 활용)
+                                if (!entityName) {
+                                    const attr = groupNameAttr || parentIdAttr || sortNoAttr || depthAttr;
+                                    if (attr) {
+                                        // @ts-ignore - internal property access
+                                        entityName = (attr as any)._entity?.entityName ||
+                                            (attr as any).entity?.entityName ||
+                                            (attr as any).container?.entity?.entityName ||
+                                            (attr as any)._container?.entity?.entityName;
+
+                                        // 2-1. ID에서 추출 시도 (Entity.Attribute 포맷인 경우)
+                                        if (!entityName && (attr as any).id) {
+                                            const idStr = String((attr as any).id);
+                                            if (idStr.includes('.')) {
+                                                entityName = idStr.split('.')[0];
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 3. Fallback: 데이터소스 자체에서 추론
+                                if (!entityName && groupDataSource) {
+                                    // @ts-ignore
+                                    entityName = (groupDataSource as any).entity ||
+                                        (groupDataSource as any)._entityName ||
+                                        (groupDataSource as any).sourceEntity ||
+                                        (groupDataSource as any)._guid?.split('/')[0];
+                                }
+
+                                if (entityName) {
+                                    console.log(`[Commit] Final detected entity name: ${entityName}`);
+                                    mx.data.create({
+                                        entity: entityName,
+                                        callback: modifyObject,
+                                        error: (err: any) => {
+                                            console.error(`[Commit] Creation failed for entity ${entityName}:`, err);
+                                            resolve(null);
+                                        }
+                                    });
+                                } else {
+                                    console.error("[Commit] Could not determine entity name for creation.");
+                                    // 최후의 수단: 브라우저 캐시나 전역 상태 어딘가에 있을 수 있는 정보 출력
+                                    console.warn("[Debug] Full groupDataSource object structure:", groupDataSource);
+                                    resolve(null);
+                                }
                                 return;
                             }
 

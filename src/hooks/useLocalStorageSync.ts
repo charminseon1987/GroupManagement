@@ -30,6 +30,7 @@ function computeChanges(items: GroupTreeItemMap, previousItems: GroupTreeItemMap
                 sortNo: currentItem.data.sortNo,
                 depth: currentItem.data.depth,
                 groupName: currentItem.data.groupName,
+                enabledTF: currentItem.data.enabledTF,
                 type: currentItem.data.isNew ? "create" : "update"
             });
         }

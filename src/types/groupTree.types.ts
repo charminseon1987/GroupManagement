@@ -54,6 +54,7 @@ export interface GroupTreeChange {
     sortNo: number;
     depth: number;
     groupName?: string;
+    enabledTF?: boolean;
     type?: "create" | "update" | "delete" | "move";
 }
 
