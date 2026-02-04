@@ -36,6 +36,7 @@ export function GroupTreeItemRenderer({
 }: GroupTreeItemProps): ReactElement {
     const [tempName, setTempName] = useState(item.data.groupName);
     const inputRef = useRef<HTMLInputElement>(null);
+    const escapePressedRef = useRef(false);
 
     const isFolder = item.isFolder ?? true;
     const hasChildren = item.children && item.children.length > 0;
@@ -47,11 +48,13 @@ export function GroupTreeItemRenderer({
     useEffect(() => {
         if (isRenaming) {
             setTempName(item.data.groupName);
+            escapePressedRef.current = false;
             setTimeout(() => inputRef.current?.focus(), 50);
         }
     }, [isRenaming, item.data.groupName]);
 
     const handleRenameSubmit = () => {
+        if (escapePressedRef.current) return;
         if (onRename) {
             onRename(item, tempName);
         }
@@ -61,6 +64,7 @@ export function GroupTreeItemRenderer({
         if (e.key === "Enter") {
             handleRenameSubmit();
         } else if (e.key === "Escape") {
+            escapePressedRef.current = true;
             if (onStopRenaming) onStopRenaming();
         }
     };

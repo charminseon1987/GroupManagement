@@ -436,7 +436,8 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                 sortNo: maxSortNo + 1,
                 depth: newDepth,
                 enabledTF: true,
-                isNew: true
+                isNew: true,
+                isClicked: true // 생성 시 시각적/로직적 선택 상태 유지
             },
             canMove: true,
             canRename: true
@@ -450,23 +451,12 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
         }
 
         setTreeItems(newItems);
-
-        // 이름 변경 시작 시 Mendix에 isClicked = true 반영
-        const item = newItems[tempId];
-        if (item) {
-            console.log(`[Rename] Starting rename for new item: ${tempId}. Setting isClicked = true.`);
-            commitChanges(newItems, treeItems, [{
-                groupId: tempId,
-                parentId: parentId,
-                sortNo: maxSortNo + 1,
-                depth: newDepth,
-                isClicked: true,
-                type: "create"
-            }]);
-        }
-
+        // [MODIFIED] Do NOT commit immediately. Wait for user input.
+        // Also select the new item immediately for better UX
+        setFocusedItem(tempId);
+        setSelectedItems([tempId]);
         setRenamingItemId(tempId);
-    }, [treeItems, commitChanges]);
+    }, [treeItems]);
 
     // 아이템 이름 변경 핸들러 (Lifting)
     const handleRenameItem = useCallback(
@@ -489,21 +479,32 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                     ...treeItems[item.index],
                     data: {
                         ...treeItems[item.index].data,
-                        groupName: name
+                        groupName: name,
+                        // [MODIFIED] Keep isClicked true if it was new (or user preference)
+                        isClicked: isNewItem ? true : treeItems[item.index].data.isClicked
                     }
                 }
             };
             setRenamingItemId(null);
+
+            // [MODIFIED] For new items, we must ensure 'type: create' is generated
+            // getChangesList compares newItems vs treeItems. 
+            // Since treeItems (prev) has the item (from handleAddSubFolder) but with empty name, 
+            // computeChanges will see it as 'update' unless we leverage isNew flag in logic or 
+            // if we consider 'treeItems' actually keeps 'isNew: true'.
+            // The item in treeItems has 'isNew: true'. So computeChanges will see 'isNew: true' and return type: 'create'.
             const changes = getChangesList(newItems, treeItems);
 
-            // 이름 변경이 완료되면 isClicked = false로 되돌림
-            const changesWithClickedOff = changes.map((c: any) => ({
+            // 이름 변경이 완료되면 isClicked 처리
+            // 신규 아이템은 선택된 상태(isClicked=true)로 저장, 기존 아이템은 선택 해제(기존 로직 유지)
+            // Or simply update based on the new state.
+            const finalChanges = changes.map((c: any) => ({
                 ...c,
-                isClicked: false
+                isClicked: isNewItem ? true : false
             }));
 
-            console.log(`[Rename] Finished renaming item: ${item.index}. New name: ${name}. Setting isClicked = false. Changes count: ${changes.length}`);
-            commitChanges(newItems, treeItems, changesWithClickedOff);
+            console.log(`[Rename] Finished renaming item: ${item.index}. New name: ${name}. isNew: ${isNewItem}. Changes count: ${changes.length}`);
+            commitChanges(newItems, treeItems, finalChanges);
         },
         [treeItems, handleTreeChange, handleRemoveItem, commitChanges]
     );
@@ -664,6 +665,30 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
 
     }, [treeItems, focusedItem, commitChanges, groupDataSource, groupSelection]);
 
+    // [NEW] Renaming cancellation handler
+    const handleStopRenaming = useCallback(() => {
+        console.log(`[Rename] handleStopRenaming called. Item: ${renamingItemId}`);
+        if (renamingItemId && treeItems[renamingItemId]) {
+            const item = treeItems[renamingItemId];
+            // If it was a new item that wasn't committed, remove it locally
+            if (item.data.isNew) {
+                console.log(`[Rename] Removing uncommitted new item: ${renamingItemId}`);
+                handleRemoveItem(String(renamingItemId));
+            } else {
+                // For existing items, just reset isClicked logic or other states
+                commitChanges(treeItems, treeItems, [{
+                    groupId: String(renamingItemId),
+                    parentId: item.data.parentId,
+                    sortNo: item.data.sortNo,
+                    depth: item.data.depth,
+                    isClicked: false,
+                    type: "update"
+                }]);
+            }
+        }
+        setRenamingItemId(null);
+    }, [renamingItemId, treeItems, handleRemoveItem, commitChanges]);
+
     if (!groupDataSource) {
         return (
             <div className="group-management-widget">
@@ -682,21 +707,7 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                 onRenameItem={handleRenameItem}
                 renamingItemId={renamingItemId}
                 onStartRenaming={handleStartRenaming}
-                onStopRenaming={() => {
-                    console.log(`[Rename] onStopRenaming called. Setting isClicked = false for: ${renamingItemId}`);
-                    if (renamingItemId && treeItems[renamingItemId]) {
-                        const item = treeItems[renamingItemId];
-                        commitChanges(treeItems, treeItems, [{
-                            groupId: String(renamingItemId),
-                            parentId: item.data.parentId,
-                            sortNo: item.data.sortNo,
-                            depth: item.data.depth,
-                            isClicked: false,
-                            type: "update"
-                        }]);
-                    }
-                    setRenamingItemId(null);
-                }}
+                onStopRenaming={handleStopRenaming}
                 focusedItem={focusedItem}
                 selectedItems={selectedItems}
                 onFocusItem={handleFocusItem}
