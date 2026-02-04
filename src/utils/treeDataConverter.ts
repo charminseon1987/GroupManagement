@@ -20,6 +20,8 @@ export interface MendixGroupEntity {
     Description?: string;
     /** EnableTF 속성 */
     EnableTF?: boolean;
+    /** IsClicked 속성 */
+    IsClicked?: boolean;
     /** Mendix GUID */
     id?: string;
 }
@@ -51,6 +53,7 @@ export function convertMendixEntitiesToTree(
             : (entity.Groupld || entity.id || "");
         const description = entity.Description;
         const enabled = entity.EnableTF ?? true;
+        const isClicked = entity.IsClicked ?? false;
 
         const itemData: GroupItemData = {
             groupId: groupId,
@@ -60,10 +63,13 @@ export function convertMendixEntitiesToTree(
             depth,
             description,
             enabledTF: enabled,
+            isClicked,
             // 기본값 설정 (추후 Mendix에서 가져올 수 있음)
             leftNo: 0,
             rightNo: 0,
-            displayYn: "Y"
+
+            displayYn: "Y",
+            id: entity.id // Map Mendix GUID
         };
 
         // 디버깅: GroupName이 ID로 대체된 경우 경고

@@ -1,4 +1,4 @@
-import { ReactElement, createElement, useState, useCallback, useEffect, useMemo } from "react";
+import { ReactElement, createElement, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Big } from "big.js";
 import { GroupManagementContainerProps } from "../typings/GroupManagementProps";
 import { GroupTreeContainer } from "./components/GroupTree/GroupTreeContainer";
@@ -19,8 +19,14 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
         descriptionAttr,
         enableAttr,
         groupIdAttr,
-        onTreeChange
+        isClickedAttr,
+        onTreeChange,
+        groupSelection
     } = props;
+
+    // Mendix action reference (to avoid stale closures in async functions)
+    const onTreeChangeRef = useRef(onTreeChange);
+    onTreeChangeRef.current = onTreeChange;
 
     // Mendix attribute configuration memoization
     const config = useMemo(() => ({
@@ -30,7 +36,8 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
         depthAttr,
         descriptionAttr,
         enableAttr,
-        groupIdAttr
+        groupIdAttr,
+        isClickedAttr
     }), [
         groupNameAttr,
         parentIdAttr,
@@ -38,7 +45,9 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
         depthAttr,
         descriptionAttr,
         enableAttr,
-        groupIdAttr
+        enableAttr,
+        groupIdAttr,
+        isClickedAttr
     ]);
 
     // Mendix datasource에서 데이터를 트리 형식으로 변환 (베이스 트리)
@@ -48,6 +57,17 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
     const [previousTreeItems, setPreviousTreeItems] = useState<GroupTreeItemMap>(baseTree);
     const [renamingItemId, setRenamingItemId] = useState<TreeItemIndex | null>(null);
 
+    // View state lifted from GroupTreeContainer
+    const [focusedItem, setFocusedItem] = useState<TreeItemIndex | undefined>();
+    const [selectedItems, setSelectedItems] = useState<TreeItemIndex[]>([]);
+
+    // [FIX] Ensure all data is loaded (disable pagination limit)
+    useEffect(() => {
+        if (groupDataSource && groupDataSource.status === "available") {
+            groupDataSource.setLimit(undefined);
+        }
+    }, [groupDataSource]);
+
     // localStorage 동기화 훅
     const { saveChanges, getChangesList } = useLocalStorageSync();
 
@@ -55,6 +75,18 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
     useEffect(() => {
         setTreeItems(baseTree);
         setPreviousTreeItems(baseTree);
+
+        // 초기 로드 시 IsClicked가 true인 항목을 찾아 포커스/선택
+        const items = Object.values(baseTree);
+        const clickedItem = items.find(item => item.data.isClicked);
+
+        if (clickedItem) {
+            console.log(`[Sync] Clicked item found in baseTree: ${clickedItem.index}. Updating focus/selection.`);
+            setFocusedItem(clickedItem.index);
+            setSelectedItems([clickedItem.index]);
+        } else if (items.length > 0 && !focusedItem) {
+            // 아무것도 선택되지 않았을 때의 초기화 로직 (필요 시)
+        }
     }, [baseTree]);
 
     // 변경사항을 DB에 저장하는 함수 (분리)
@@ -64,10 +96,21 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
             prevItems: GroupTreeItemMap,
             changes: GroupTreeChange[]
         ) => {
-            // 트리 상태 업데이트
             setTreeItems(newItems);
             setPreviousTreeItems(newItems);
             saveChanges(newItems, prevItems);
+
+            // [REMOVED] Execute microflow immediately (Moved to after commit to ensure DB sync)
+            /*
+            const action = onTreeChangeRef.current;
+            if (action && !action.isExecuting) {
+                const changesJson = JSON.stringify(changes);
+                console.log(`[Commit] Triggering onTreeChange immediately with JSON:`, changesJson);
+                action.execute({ changesJson });
+            } else if (action?.isExecuting) {
+                console.warn(`[Commit] onTreeChange was skipped because it is already executing.`);
+            }
+            */
 
             if (changes.length > 0 && groupDataSource?.items) {
                 const mx = (window as any).mx;
@@ -83,37 +126,55 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                             const modifyObject = (mxobj: any) => {
                                 try {
                                     const attrs = mxobj.getAttributes();
-                                    const setAttr = (search: string, value: any) => {
-                                        const exact = attrs.find((a: string) => a.toLowerCase() === search.toLowerCase());
+                                    const setAttr = (search: string, value: any, attrProp?: any) => {
+                                        // 1. 프로퍼티 설정값에서 속성명 추출 시도 (가장 정확)
+                                        let exactName: string | undefined;
+                                        if (attrProp && (attrProp as any).id) {
+                                            const idStr = String((attrProp as any).id);
+                                            exactName = idStr.includes('.') ? idStr.split('.').pop() : idStr;
+                                        }
+
+                                        // 2. 검색어로 찾기 (대소문자 무시)
+                                        const exact = attrs.find((a: string) =>
+                                            (exactName && a.toLowerCase() === exactName.toLowerCase()) ||
+                                            (a.toLowerCase() === search.toLowerCase())
+                                        );
+
                                         if (exact) {
+                                            console.log(`[Commit] Setting ${exact} = ${value} for ${change.groupId}`);
                                             mxobj.set(exact, value);
                                             return true;
                                         }
+                                        console.warn(`[Commit] Attribute "${search}" (Detected: ${exactName}) not found on object ${mxobj.getEntity()}`);
                                         return false;
                                     };
 
-                                    setAttr("ParentId", change.parentId);
-                                    setAttr("SortNo", new Big(change.sortNo));
-                                    setAttr("Depth", new Big(change.depth));
+                                    setAttr("ParentId", change.parentId, parentIdAttr);
+                                    setAttr("SortNo", new Big(change.sortNo), sortNoAttr);
+                                    setAttr("Depth", new Big(change.depth), depthAttr);
                                     if (change.groupName !== undefined) {
-                                        setAttr("GroupName", change.groupName);
+                                        setAttr("GroupName", change.groupName, groupNameAttr);
                                     }
 
                                     // 신규 생성 시 기본값 또는 특정 필드 설정
                                     if (change.type === "create") {
-                                        setAttr("EnableTF", true);
-                                        // GroupId가 필요한 경우 설정 (만약 Mendix에서 자동 생성하지 않는 경우)
+                                        setAttr("EnableTF", true, enableAttr);
+                                        // GroupId가 필요한 경우 설정
                                         if (change.groupId && !change.groupId.startsWith("new_folder_")) {
-                                            setAttr("GroupId", change.groupId);
+                                            setAttr("GroupId", change.groupId, groupIdAttr);
                                         }
                                     } else if (change.enabledTF !== undefined) {
-                                        setAttr("EnableTF", change.enabledTF);
+                                        setAttr("EnableTF", change.enabledTF, enableAttr);
+                                    }
+
+                                    if (change.isClicked !== undefined) {
+                                        setAttr("IsClicked", change.isClicked, isClickedAttr);
                                     }
 
                                     console.log(`[Commit] Prepared object for ${change.groupId} (Type: ${change.type})`);
                                     resolve(mxobj);
                                 } catch (error) {
-                                    console.error(`[Commit] Failed to set values:`, error);
+                                    console.error(`[Commit] Failed to set values for ${change.groupId}:`, error);
                                     resolve(null);
                                 }
                             };
@@ -234,6 +295,10 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                                 mxobjs: validObjects,
                                 callback: () => {
                                     console.log(`Successfully committed ${validObjects.length} objects`);
+                                    // 클라이언트 측 업데이트 알림 (다른 위젯 UI 갱신 도움)
+                                    validObjects.forEach(obj => {
+                                        mx.data.update({ guid: obj.getGuid() });
+                                    });
                                     resolveCommit();
                                 },
                                 error: (error: any) => {
@@ -243,21 +308,36 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                             });
                         });
 
-                        setTimeout(() => {
-                            if (groupDataSource.reload) {
-                                groupDataSource.reload();
-                            }
-                        }, 500);
+                        // 트리 새로고침
+                        console.log("[Commit] Commits finished. Requesting datasource reload and UI refresh.");
+
+                        // 1. 데이터 소스 리로드
+                        if (groupDataSource.reload) {
+                            groupDataSource.reload();
+                        }
+
+                        // [NEW] Execute microflow AFTER commit to ensure Mendix refresh sees new data
+                        const action = onTreeChangeRef.current;
+                        if (action && !action.isExecuting) {
+                            const changesJson = JSON.stringify(changes);
+                            console.log(`[Commit] Triggering onTreeChange AFTER commit with JSON:`, changesJson);
+                            action.execute({ changesJson });
+                        } else if (action?.isExecuting) {
+                            console.warn(`[Commit] onTreeChange (Post-Commit) was skipped because it is already executing.`);
+                        }
+
+                        // 2. 전체 페이지 새로고침 알림 (필요한 경우)
+                        const mxui = (window as any).mx?.ui;
+                        if (mxui && typeof mxui.reload === "function") {
+                            console.log("[Commit] Triggering full UI reload to ensure page rendering.");
+                            mxui.reload();
+                        } else {
+                            console.warn("[Commit] mx.ui.reload is not available. UI might not refresh completely.");
+                        }
                     }
                 } catch (error) {
                     console.error("Error during commit process:", error);
                 }
-            }
-
-            // 추가 명령 실행 (onTreeChange)
-            if (onTreeChange && onTreeChange.canExecute && !onTreeChange.isExecuting) {
-                const changesJson = JSON.stringify(changes);
-                onTreeChange.execute({ changesJson });
             }
         },
         [saveChanges, groupDataSource, onTreeChange, groupIdAttr]
@@ -370,8 +450,23 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
         }
 
         setTreeItems(newItems);
+
+        // 이름 변경 시작 시 Mendix에 isClicked = true 반영
+        const item = newItems[tempId];
+        if (item) {
+            console.log(`[Rename] Starting rename for new item: ${tempId}. Setting isClicked = true.`);
+            commitChanges(newItems, treeItems, [{
+                groupId: tempId,
+                parentId: parentId,
+                sortNo: maxSortNo + 1,
+                depth: newDepth,
+                isClicked: true,
+                type: "create"
+            }]);
+        }
+
         setRenamingItemId(tempId);
-    }, [treeItems]);
+    }, [treeItems, commitChanges]);
 
     // 아이템 이름 변경 핸들러 (Lifting)
     const handleRenameItem = useCallback(
@@ -399,10 +494,175 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                 }
             };
             setRenamingItemId(null);
-            handleTreeChange(newItems);
+            const changes = getChangesList(newItems, treeItems);
+
+            // 이름 변경이 완료되면 isClicked = false로 되돌림
+            const changesWithClickedOff = changes.map((c: any) => ({
+                ...c,
+                isClicked: false
+            }));
+
+            console.log(`[Rename] Finished renaming item: ${item.index}. New name: ${name}. Setting isClicked = false. Changes count: ${changes.length}`);
+            commitChanges(newItems, treeItems, changesWithClickedOff);
         },
-        [treeItems, handleTreeChange, handleRemoveItem]
+        [treeItems, handleTreeChange, handleRemoveItem, commitChanges]
     );
+
+    // 이름 변경 시작 핸들러
+    const handleStartRenaming = useCallback((itemId: TreeItemIndex) => {
+        console.log(`[Rename] handleStartRenaming called for: ${itemId}`);
+        setRenamingItemId(itemId);
+
+        // Mendix에 isClicked = true 반영 (배타적 설정 및 로컬 즉시 반영)
+        const currentItems = treeItems;
+        const newItems = { ...currentItems };
+        const changes: GroupTreeChange[] = [];
+
+        // 1. 모든 항목의 로컬 IsClicked를 false로 (필요한 경우에만)
+        Object.keys(newItems).forEach(id => {
+            if (newItems[id].data.isClicked) {
+                newItems[id] = {
+                    ...newItems[id],
+                    data: { ...newItems[id].data, isClicked: false }
+                };
+            }
+        });
+
+        // 2. 다른 모든 항목의 Mendix IsClicked를 false로 변경할 변경사항 수집
+        Object.values(currentItems).forEach(item => {
+            if (item.data.isClicked && item.index !== itemId && !item.data.isNew) {
+                changes.push({
+                    groupId: String(item.index),
+                    parentId: item.data.parentId,
+                    sortNo: item.data.sortNo,
+                    depth: item.data.depth,
+                    isClicked: false,
+                    type: "update"
+                });
+            }
+        });
+
+        // 3. 현재 항목의 로컬 및 Mendix 상태를 true로
+        const item = currentItems[itemId];
+        if (item && !item.data.isNew) {
+            newItems[itemId] = {
+                ...item,
+                data: { ...item.data, isClicked: true }
+            };
+
+            console.log(`[Rename] Setting isClicked = true for existing item: ${itemId}`);
+            changes.push({
+                groupId: String(itemId),
+                parentId: item.data.parentId,
+                sortNo: item.data.sortNo,
+                depth: item.data.depth,
+                isClicked: true,
+                type: "update"
+            });
+        }
+
+        if (changes.length > 0) {
+            commitChanges(newItems, currentItems, changes);
+        } else {
+            setTreeItems(newItems); // 변경사항이 없어도 로컬 UI 상태는 일관성 있게 업데이트
+        }
+    }, [treeItems, commitChanges]);
+
+    // 아이템 포커스 핸들러 (IsClicked 속성 관리 포함)
+    const handleFocusItem = useCallback((itemId: TreeItemIndex) => {
+        if (itemId === focusedItem) return;
+
+        setFocusedItem(itemId);
+        setSelectedItems([itemId]);
+
+        // Mendix에 isClicked 반영 (배타적 설정 및 로컬 즉시 반영)
+        const currentItems = treeItems;
+        const newItems = { ...currentItems };
+        const changes: GroupTreeChange[] = [];
+
+        // 1. 모든 항목의 로컬 IsClicked를 false로
+        Object.keys(newItems).forEach(id => {
+            if (newItems[id].data.isClicked) {
+                newItems[id] = {
+                    ...newItems[id],
+                    data: { ...newItems[id].data, isClicked: false }
+                };
+            }
+        });
+
+        // 2. 기존에 Mendix에서 IsClicked가 true였던 항목들을 찾아 false 변경사항 수집
+        Object.values(currentItems).forEach(item => {
+            if (item.data.isClicked && item.index !== itemId && !item.data.isNew) {
+                changes.push({
+                    groupId: String(item.index),
+                    parentId: item.data.parentId,
+                    sortNo: item.data.sortNo,
+                    depth: item.data.depth,
+                    isClicked: false,
+                    type: "update"
+                });
+            }
+        });
+
+        // 3. 현재 클릭한 항목을 로컬 및 Mendix 상태 true로
+        const targetItem = currentItems[itemId];
+        if (targetItem && !targetItem.data.isNew) {
+            newItems[itemId] = {
+                ...targetItem,
+                data: { ...targetItem.data, isClicked: true }
+            };
+
+            if (!targetItem.data.isClicked) {
+                changes.push({
+                    groupId: String(itemId),
+                    parentId: targetItem.data.parentId,
+                    sortNo: targetItem.data.sortNo,
+                    depth: targetItem.data.depth,
+                    isClicked: true,
+                    type: "update"
+                });
+            }
+        }
+
+        if (changes.length > 0) {
+            console.log(`[Focus] Toggling isClicked for exclusive selection. Changes:`, changes);
+            commitChanges(newItems, currentItems, changes);
+        } else {
+            setTreeItems(newItems); // 변경사항이 없어도 로컬 UI 상태는 업데이트
+        }
+
+        // [NEW] Sync with Mendix Selection (Listen to Widget)
+        if (groupSelection && groupDataSource?.items) {
+            const treeItem = treeItems[itemId];
+            const mendixGuid = treeItem?.data?.id; // This is the GUID stored in data
+
+            console.log(`[Selection] Attempting to select item. TreeId: ${itemId}, MendixGUID: ${mendixGuid}`);
+
+            // Find the Mendix ObjectItem using the GUID
+            let selectedObject = undefined;
+            if (mendixGuid) {
+                selectedObject = groupDataSource.items.find(item => item.id === mendixGuid);
+            } else {
+                // Fallback: try direct match if no data.id (unlikely)
+                selectedObject = groupDataSource.items.find(item => item.id === itemId);
+            }
+
+            console.log(`[Selection] Found object:`, selectedObject ? "Yes" : "No", selectedObject ? selectedObject.id : "null");
+
+            if (selectedObject) {
+                if (groupSelection.setSelection) {
+                    groupSelection.setSelection(selectedObject);
+                }
+            } else {
+                console.warn(`[Selection] Could not find object for GUID: ${mendixGuid}. Available items:`, groupDataSource.items.length);
+                // If nothing selected or not found, maybe clear selection?
+                if (groupSelection.setSelection) {
+                    groupSelection.setSelection(undefined);
+                }
+            }
+        }
+
+    }, [treeItems, focusedItem, commitChanges, groupDataSource, groupSelection]);
 
     if (!groupDataSource) {
         return (
@@ -421,8 +681,26 @@ export function GroupManagement(props: GroupManagementContainerProps): ReactElem
                 onAddSubFolder={handleAddSubFolder}
                 onRenameItem={handleRenameItem}
                 renamingItemId={renamingItemId}
-                onStartRenaming={(id: any) => setRenamingItemId(id)}
-                onStopRenaming={() => setRenamingItemId(null)}
+                onStartRenaming={handleStartRenaming}
+                onStopRenaming={() => {
+                    console.log(`[Rename] onStopRenaming called. Setting isClicked = false for: ${renamingItemId}`);
+                    if (renamingItemId && treeItems[renamingItemId]) {
+                        const item = treeItems[renamingItemId];
+                        commitChanges(treeItems, treeItems, [{
+                            groupId: String(renamingItemId),
+                            parentId: item.data.parentId,
+                            sortNo: item.data.sortNo,
+                            depth: item.data.depth,
+                            isClicked: false,
+                            type: "update"
+                        }]);
+                    }
+                    setRenamingItemId(null);
+                }}
+                focusedItem={focusedItem}
+                selectedItems={selectedItems}
+                onFocusItem={handleFocusItem}
+                onSelectItems={setSelectedItems}
             />
         </div>
     );

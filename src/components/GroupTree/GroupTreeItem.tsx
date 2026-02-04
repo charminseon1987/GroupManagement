@@ -94,6 +94,11 @@ export function GroupTreeItemRenderer({
                 onClick={() => {
                     context.focusItem();
                 }}
+                onDoubleClick={() => {
+                    console.log(`[Row-DoubleClick] item: ${item.index}`);
+                    console.log(`isClicked 상태값: ${item.data.isClicked}`);
+                    if (onStartRenaming) onStartRenaming();
+                }}
             >
                 <div className="group-tree-drag-handle">
                     <DragHandleIcon size={14} />
@@ -140,9 +145,14 @@ export function GroupTreeItemRenderer({
                         ) : (
                             <span
                                 className="group-tree-item-name"
-                                onDoubleClick={(e) => {
-                                    e.stopPropagation();
-                                    if (onStartRenaming) onStartRenaming();
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === "F2") {
+                                        console.log(`[Rename] F2 pressed for item: ${item.index}`);
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (onStartRenaming) onStartRenaming();
+                                    }
                                 }}
                             >
                                 {item.data.groupName || "(이름 없음)"}

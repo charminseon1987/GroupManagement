@@ -12,6 +12,13 @@
                 <caption>Data source</caption>
                 <description>List of menu items from microflow</description>
             </property>
+            <property key="groupSelection" type="selection" required="true" dataSource="groupDataSource">
+                <caption>Selection</caption>
+                <description>The selected group</description>
+                <selectionTypes>
+                    <selectionType name="Single"/>
+                </selectionTypes>
+            </property>
             <property key="groupNameAttr" type="attribute" dataSource="groupDataSource" required="true">
                 <caption>Group Name</caption>
                 <description>Attribute for group name</description>
@@ -63,6 +70,13 @@
                     <attributeType name="String"/>
                     <attributeType name="AutoNumber"/>
                     <attributeType name="Long"/>
+                </attributeTypes>
+            </property>
+            <property key="isClickedAttr" type="attribute" dataSource="groupDataSource" required="false">
+                <caption>Is Clicked Status</caption>
+                <description>Attribute for tracking clicked status (Boolean)</description>
+                <attributeTypes>
+                    <attributeType name="Boolean"/>
                 </attributeTypes>
             </property>
         </propertyGroup>

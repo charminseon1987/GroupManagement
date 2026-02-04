@@ -21,6 +21,7 @@ export function useGroupTreeData(
         descriptionAttr?: ListAttributeValue<string>;
         enableAttr?: ListAttributeValue<boolean>;
         groupIdAttr?: ListAttributeValue<string | Big>;
+        isClickedAttr?: ListAttributeValue<boolean>;
     }
 ): GroupTreeItemMap {
     return useMemo(() => {
@@ -155,6 +156,18 @@ export function useGroupTreeData(
                 }
             }
 
+            // IsClicked
+            const explicitIsClicked = getMendixAttrValue(config?.isClickedAttr);
+            let isClicked = false;
+            if (explicitIsClicked !== undefined) {
+                isClicked = explicitIsClicked;
+            } else {
+                const isClickedVal = getAttrAnyCase(["IsClicked", "isclicked", "isClicked"]);
+                if (isClickedVal !== undefined) {
+                    if (isClickedVal.toLowerCase() === "true" || isClickedVal === "1") isClicked = true;
+                }
+            }
+
             return {
                 Groupld: groupId, // 호환성 유지
                 GroupName: groupName,
@@ -163,6 +176,7 @@ export function useGroupTreeData(
                 Depth: depth,
                 Description: description,
                 EnableTF: enabled,
+                IsClicked: isClicked,
                 id: item.id || ""
             };
         });

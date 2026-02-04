@@ -27,6 +27,10 @@ interface GroupTreeContainerProps {
     renamingItemId: TreeItemIndex | null;
     onStartRenaming: (itemId: TreeItemIndex) => void;
     onStopRenaming: () => void;
+    focusedItem?: TreeItemIndex;
+    selectedItems?: TreeItemIndex[];
+    onFocusItem?: (itemId: TreeItemIndex) => void;
+    onSelectItems?: (items: TreeItemIndex[]) => void;
 }
 
 /**
@@ -40,12 +44,14 @@ export function GroupTreeContainer({
     onRenameItem,
     renamingItemId,
     onStartRenaming,
-    onStopRenaming
+    onStopRenaming,
+    focusedItem,
+    selectedItems = [],
+    onFocusItem,
+    onSelectItems
 }: GroupTreeContainerProps): ReactElement {
     // View state
-    const [focusedItem, setFocusedItem] = useState<TreeItemIndex | undefined>();
     const [expandedItems, setExpandedItems] = useState<TreeItemIndex[]>([]);
-    const [selectedItems, setSelectedItems] = useState<TreeItemIndex[]>([]);
 
     // treeItems가 변경될 때 자동으로 확장 상태 업데이트
     useEffect(() => {
@@ -241,13 +247,13 @@ export function GroupTreeContainer({
 
     // 아이템 포커스
     const handleFocusItem = useCallback((item: TreeItem<GroupItemData>) => {
-        setFocusedItem(item.index);
-    }, []);
+        if (onFocusItem) onFocusItem(item.index);
+    }, [onFocusItem]);
 
     // 아이템 선택
     const handleSelectItems = useCallback((items: TreeItemIndex[]) => {
-        setSelectedItems(items);
-    }, []);
+        if (onSelectItems) onSelectItems(items);
+    }, [onSelectItems]);
 
 
     // 아이템 렌더러

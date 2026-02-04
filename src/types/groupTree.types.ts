@@ -15,12 +15,14 @@ export interface GroupItemData {
     rightNo?: number;
     displayYn?: string;
     enabledTF: boolean;
+    isClicked?: boolean;
 
     // Local-only flag for creation
     isNew?: boolean;
 
     // Mendix Object
     guid?: string;
+    id?: string;
 }
 
 /**
@@ -55,6 +57,7 @@ export interface GroupTreeChange {
     depth: number;
     groupName?: string;
     enabledTF?: boolean;
+    isClicked?: boolean;
     type?: "create" | "update" | "delete" | "move";
 }
 
